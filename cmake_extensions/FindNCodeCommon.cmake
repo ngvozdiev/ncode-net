@@ -11,7 +11,7 @@
 #  NCODE_COMMON_LIBRARY      The ncode-common library
 
 find_path(NCODE_COMMON_INCLUDE_DIR
-    NAMES ncode_common/common.h)
+    NAMES ncode/ncode_common/common.h)
 
 find_library(NCODE_COMMON_LIBRARY
   NAMES ncode_common)

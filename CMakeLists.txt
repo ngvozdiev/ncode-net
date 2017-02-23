@@ -56,7 +56,7 @@ include_directories(${PROTOBUF_INCLUDE_DIRS} ${PCAP_INCLUDE_DIR} ${CMAKE_BINARY_
 PROTOBUF_GENERATE_CPP(PROTO_NET_SRCS PROTO_NET_HDRS src/net.proto)
 set_property(SOURCE ${PROTO_NET_SRCS} APPEND_STRING PROPERTY COMPILE_FLAGS "-Wno-extended-offsetof")
 set(NET_HEADER_FILES src/net_common.h src/net_gen.h src/pcap.h src/algorithm.h src/constraint.h src/path_cache.h ${PROTO_NET_HDRS})
-add_library(ncode_net STATIC src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc src/constraint.cc src/path_cache.cc ${PROTO_NET_SRCS} ${NET_HEADER_FILES})
+add_library(ncode_net SHARED src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc src/constraint.cc src/path_cache.cc ${PROTO_NET_SRCS} ${NET_HEADER_FILES})
 target_link_libraries(ncode_net ${PCAP_LIBRARY} ${PROTOBUF_LIBRARIES} ncode_common)
 
 if (NOT NCODE_NET_DISABLE_TESTS)
@@ -71,3 +71,10 @@ if (NOT NCODE_NET_DISABLE_BENCHMARKS)
   add_executable(net_algorithm_benchmark src/algorithm_benchmark.cc)
   target_link_libraries(net_algorithm_benchmark ncode_net)
 endif()
+
+INSTALL(TARGETS ncode_net
+  DESTINATION "lib")
+
+INSTALL (
+  FILES ${NET_HEADER_FILES}
+  DESTINATION include/ncode/ncode_net)
