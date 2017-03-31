@@ -22,6 +22,7 @@ constexpr Delay AllPairShortestPath::kMaxDistance;
 DirectedGraph::DirectedGraph(const GraphStorage* parent)
     : graph_storage_(parent) {
   ConstructAdjacencyList();
+  CacheSP();
 }
 
 void DirectedGraph::ConstructAdjacencyList() {
@@ -40,6 +41,19 @@ void DirectedGraph::ConstructAdjacencyList() {
     }
 
     out_links.emplace_back(link);
+  }
+}
+
+void DirectedGraph::CacheSP() {
+  CHECK(shortest_paths_.Empty()) << "Already cached";
+
+  for (GraphNodeIndex src : graph_storage_->AllNodes()) {
+    ShortestPath sp(&adjacency_list_, graph_storage_, src);
+    for (GraphNodeIndex dst : graph_storage_->AllNodes()) {
+      if (src != dst) {
+        shortest_paths_[src][dst] = sp.GetPath(dst);
+      }
+    }
   }
 }
 
@@ -214,7 +228,6 @@ void DFS::ReachableNodesRecursive(GraphNodeIndex at,
 }
 
 LinkSequence ShortestPath::GetPath(GraphNodeIndex dst) const {
-  const GraphStorage* graph_storage = graph_->graph_storage();
   Links links_reverse;
 
   GraphNodeIndex current = dst;
@@ -224,7 +237,7 @@ LinkSequence ShortestPath::GetPath(GraphNodeIndex dst) const {
     }
 
     GraphLinkIndex link = previous_[current];
-    const GraphLink* link_ptr = graph_storage->GetLink(link);
+    const GraphLink* link_ptr = graph_storage_->GetLink(link);
 
     links_reverse.emplace_back(link);
     current = link_ptr->src();
@@ -240,15 +253,8 @@ void ShortestPath::ComputePaths() {
   std::priority_queue<DelayAndIndex, std::vector<DelayAndIndex>,
                       std::greater<DelayAndIndex>> vertex_queue;
 
-  const GraphNodeMap<std::vector<GraphLinkIndex>>& adjacency_list =
-      graph_->AdjacencyList();
-  const GraphStorage* graph_storage = graph_->graph_storage();
-  if (config_.CanExcludeNode(src_)) {
-    return;
-  }
-
-  min_delays_.Resize(graph_storage->NodeCount());
-  previous_.Resize(graph_storage->NodeCount());
+  min_delays_.Resize(graph_storage_->NodeCount());
+  previous_.Resize(graph_storage_->NodeCount());
 
   min_delays_.UnsafeAccess(src_).distance = Delay::zero();
   vertex_queue.emplace(Delay::zero(), src_);
@@ -259,7 +265,7 @@ void ShortestPath::ComputePaths() {
     std::tie(distance, current) = vertex_queue.top();
     vertex_queue.pop();
 
-    if (!adjacency_list.HasValue(current)) {
+    if (!adj_list_->HasValue(current)) {
       // A leaf.
       continue;
     }
@@ -270,20 +276,69 @@ void ShortestPath::ComputePaths() {
     }
 
     const std::vector<GraphLinkIndex>& neighbors =
-        adjacency_list.UnsafeAccess(current);
+        adj_list_->UnsafeAccess(current);
     for (GraphLinkIndex out_link : neighbors) {
-      if (config_.CanExcludeLink(out_link)) {
-        continue;
-      }
-
-      const GraphLink* out_link_ptr = graph_storage->GetLink(out_link);
+      const GraphLink* out_link_ptr = graph_storage_->GetLink(out_link);
       GraphNodeIndex neighbor_node = out_link_ptr->dst();
-      if (config_.CanExcludeNode(neighbor_node)) {
+
+      const Delay link_delay = out_link_ptr->delay();
+      const Delay distance_via_neighbor = distance + link_delay;
+      Delay& curr_min_distance =
+          min_delays_.UnsafeAccess(neighbor_node).distance;
+
+      if (distance_via_neighbor < curr_min_distance) {
+        curr_min_distance = distance_via_neighbor;
+        previous_.UnsafeAccess(neighbor_node) = out_link;
+        vertex_queue.emplace(curr_min_distance, neighbor_node);
+      }
+    }
+  }
+}
+
+LinkSequence DirectedGraph::ShortestPathWithConstraints(
+    const GraphSearchAlgorithmExclusionSet& to_exclude, GraphNodeIndex src,
+    GraphNodeIndex dst) const {
+  using DelayAndIndex = std::pair<Delay, GraphNodeIndex>;
+  std::priority_queue<DelayAndIndex, std::vector<DelayAndIndex>,
+                      std::greater<DelayAndIndex>> open_set;
+  GraphNodeSet closed_set;
+  GraphNodeMap<Delay> g_score;
+  g_score.Resize(graph_storage_->NodeCount());
+  for (GraphNodeIndex node_index : graph_storage_->AllNodes()) {
+    g_score.UnsafeAccess(node_index) = Delay::max();
+  }
+  g_score[src] = Delay::zero();
+  open_set.emplace(ShortestPath(src, dst).delay(), src);
+
+  GraphNodeMap<GraphLinkIndex> previous;
+  previous.Resize(graph_storage_->NodeCount());
+  while (!open_set.empty()) {
+    Delay distance;
+    GraphNodeIndex current;
+    std::tie(distance, current) = open_set.top();
+    open_set.pop();
+
+    if (closed_set.Contains(current)) {
+      continue;
+    }
+    closed_set.Insert(current);
+
+    if (!adjacency_list_.HasValue(current)) {
+      // A leaf.
+      continue;
+    }
+
+    const std::vector<GraphLinkIndex>& neighbors =
+        adjacency_list_.UnsafeAccess(current);
+    for (GraphLinkIndex out_link : neighbors) {
+      const GraphLink* out_link_ptr = graph_storage_->GetLink(out_link);
+      GraphNodeIndex neighbor_node = out_link_ptr->dst();
+      if (closed_set.Contains(neighbor_node)) {
         continue;
       }
 
       const Delay link_delay = out_link_ptr->delay();
-      const Delay distance_via_neighbor = distance + link_delay;
+      const Delay tentative_g_score = g_score[current] + link_delay;
       Delay& curr_min_distance =
           min_delays_.UnsafeAccess(neighbor_node).distance;
 

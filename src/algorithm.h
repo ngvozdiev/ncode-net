@@ -10,36 +10,43 @@
 namespace nc {
 namespace net {
 
-// A directed graph.
-class DirectedGraph {
+// Single source shortest path.
+class ShortestPath {
  public:
-  DirectedGraph(const GraphStorage* parent);
-
-  // Returns the adjacency list.
-  const GraphNodeMap<std::vector<GraphLinkIndex>>& AdjacencyList() const {
-    return adjacency_list_;
+  ShortestPath(const GraphNodeMap<std::vector<GraphLinkIndex>>* adj_list,
+               const GraphStorage* graph_storage, GraphNodeIndex src)
+      : src_(src), adj_list_(adj_list), graph_storage_(graph_storage) {
+    ComputePaths();
   }
 
-  // The parent graph. Not owned by this object.
-  const GraphStorage* graph_storage() const { return graph_storage_; }
-
-  // Returns true if there is at most one link between any two nodes.
-  bool IsSimple() const { return simple_; }
+  // Returns the shortest path to the destination.
+  LinkSequence GetPath(GraphNodeIndex dst) const;
 
  private:
-  void ConstructAdjacencyList();
+  struct DistanceFromSource {
+    DistanceFromSource() : distance(Delay::max()) {}
+    Delay distance;
+  };
 
+  void ComputePaths();
+
+  // The source.
+  GraphNodeIndex src_;
+
+  // For each node, the link that leads to it in the SP tree.
+  GraphNodeMap<GraphLinkIndex> previous_;
+
+  // Delays from each node to the destination.
+  GraphNodeMap<DistanceFromSource> min_delays_;
+
+  // Adjacency list.
+  const GraphNodeMap<std::vector<GraphLinkIndex>>* adj_list_;
+
+  // Graph storage.
   const GraphStorage* graph_storage_;
-
-  // For each node the edges that leave the node. Some edges may lead to the
-  // same neighbor if simple_ is false.
-  GraphNodeMap<std::vector<GraphLinkIndex>> adjacency_list_;
-
-  // True if there are no multiple edges between any two nodes.
-  bool simple_;
 };
 
-class GraphSearchAlgorithmConfig {
+class GraphSearchAlgorithmExclusionSet {
  public:
   void AddToExcludeLinks(const GraphLinkSet* set) {
     link_sets_to_exclude_.emplace_back(set);
@@ -83,6 +90,51 @@ class GraphSearchAlgorithmConfig {
   std::vector<const GraphNodeSet*> node_sets_to_exclude_;
 };
 
+// A directed graph.
+class DirectedGraph {
+ public:
+  DirectedGraph(const GraphStorage* parent);
+
+  // Returns the adjacency list.
+  const GraphNodeMap<std::vector<GraphLinkIndex>>& AdjacencyList() const {
+    return adjacency_list_;
+  }
+
+  // The parent graph. Not owned by this object.
+  const GraphStorage* graph_storage() const { return graph_storage_; }
+
+  // Returns true if there is at most one link between any two nodes.
+  bool IsSimple() const { return simple_; }
+
+  // Returns the shortest path from 'from 'to 'to'. This considers the entire
+  // graph so it is a lower bound.
+  const LinkSequence& ShortestPath(GraphNodeIndex from,
+                                   GraphNodeIndex to) const;
+
+  // Same as above, but can exclude arbitrary nodes/links from the search.
+  LinkSequence ShortestPathWithConstraints(
+      const GraphSearchAlgorithmExclusionSet& to_exclude, GraphNodeIndex from,
+      GraphNodeIndex to) const;
+
+ private:
+  void ConstructAdjacencyList();
+
+  // Runs N instances of single-source shortest path and populates 'distances_'.
+  void CacheSP();
+
+  const GraphStorage* graph_storage_;
+
+  // For each node the edges that leave the node. Some edges may lead to the
+  // same neighbor if simple_ is false.
+  GraphNodeMap<std::vector<GraphLinkIndex>> adjacency_list_;
+
+  // True if there are no multiple edges between any two nodes.
+  bool simple_;
+
+  // Caches the best possible distance between two nodes.
+  GraphNodeMap<GraphNodeMap<LinkSequence>> shortest_paths_;
+};
+
 class GraphSearchAlgorithm {
  protected:
   GraphSearchAlgorithm(const GraphSearchAlgorithmConfig& config,
@@ -93,82 +145,6 @@ class GraphSearchAlgorithm {
 
   // Configuration for the algorithm.
   const GraphSearchAlgorithmConfig config_;
-};
-
-struct DistanceClusterTag {};
-using DistanceClusterIndex = Index<DistanceClusterTag, uint16_t>;
-using DistanceClusterSet = PerfectHashSet<uint16_t, DistanceClusterTag>;
-
-template <typename V>
-using DistanceClusterMap = PerfectHashMap<uint16_t, DistanceClusterTag, V>;
-
-// Clusters a graph based on some distance threshold.
-class DistanceClusteredGraph : public GraphSearchAlgorithm {
- public:
-  DistanceClusteredGraph(const GraphSearchAlgorithmConfig& config,
-                         Delay threshold, DirectedGraph* parent)
-      : GraphSearchAlgorithm(config, parent) {
-    Cluster(threshold);
-  }
-
-  // Returns the set of nodes that belong to a cluster.
-  const GraphNodeSet& GetCluster(DistanceClusterIndex cluster_index) const {
-    return cluster_store_.GetItemOrDie(cluster_index);
-  }
-
-  // Returns the index of the cluster that a node belongs to. Each node can be
-  // part of at most one cluster.
-  DistanceClusterIndex GetClusterForNode(GraphNodeIndex node_index) const {
-    return node_to_cluster_.GetValueOrDie(node_index);
-  }
-
-  // Returns a set that includes only links that start/end at the given cluster.
-  GraphLinkSet GetClusterLinkSet(DistanceClusterIndex cluster_index) const;
-
-  const GraphNodeMap<DistanceClusterIndex>& node_to_cluster() const {
-    return node_to_cluster_;
-  }
-
-  DistanceClusterSet AllClusters() const {
-    return DistanceClusterSet::FullSetFromStore(cluster_store_);
-  }
-
-  GraphStorage* clustered_storage() { return clustered_storage_.get(); }
-
-  const GraphStorage* clustered_storage() const {
-    return clustered_storage_.get();
-  }
-
-  const GraphLinkMap<GraphLinkIndex>& real_to_clustered_links() const {
-    return real_to_clustered_links_;
-  }
-
-  const GraphLinkMap<GraphLinkIndex>& clustered_to_real_links() const {
-    return clustered_to_real_links_;
-  }
-
-  const GraphNodeMap<GraphNodeIndex>& real_to_clustered_nodes() const {
-    return real_to_clustered_nodes_;
-  }
-
- private:
-  static bool IsInClusters(const std::vector<GraphNodeSet>& clusters,
-                           GraphNodeIndex node);
-
-  void Cluster(Delay threshold);
-
-  // Clusters are stored here. Populated upon construction.
-  PerfectHashStore<GraphNodeSet, uint16_t, DistanceClusterTag> cluster_store_;
-
-  // Relates from node to the node's cluster index.
-  GraphNodeMap<DistanceClusterIndex> node_to_cluster_;
-
-  // The graph composed of only the clustered nodes.
-  std::unique_ptr<GraphStorage> clustered_storage_;
-
-  GraphLinkMap<GraphLinkIndex> real_to_clustered_links_;
-  GraphLinkMap<GraphLinkIndex> clustered_to_real_links_;
-  GraphNodeMap<GraphNodeIndex> real_to_clustered_nodes_;
 };
 
 // Computes shortest paths between all pairs of nodes, can also be used to
@@ -209,36 +185,6 @@ class AllPairShortestPath : public GraphSearchAlgorithm {
 
   // Distances to the destination.
   GraphNodeMap<GraphNodeMap<SPData>> data_;
-};
-
-// Single source shortest path.
-class ShortestPath : public GraphSearchAlgorithm {
- public:
-  ShortestPath(const GraphSearchAlgorithmConfig& config, GraphNodeIndex src,
-               const DirectedGraph* graph)
-      : GraphSearchAlgorithm(config, graph), src_(src) {
-    ComputePaths();
-  }
-
-  // Returns the shortest path to the destination.
-  LinkSequence GetPath(GraphNodeIndex dst) const;
-
- private:
-  struct DistanceFromSource {
-    DistanceFromSource() : distance(Delay::max()) {}
-    Delay distance;
-  };
-
-  void ComputePaths();
-
-  // The source.
-  GraphNodeIndex src_;
-
-  // For each node, the link that leads to it in the SP tree.
-  GraphNodeMap<GraphLinkIndex> previous_;
-
-  // Delays from each node to the destination.
-  GraphNodeMap<DistanceFromSource> min_delays_;
 };
 
 // Returns the single shortest path that goes through a series of links in the
