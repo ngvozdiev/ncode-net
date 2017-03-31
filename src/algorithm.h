@@ -53,7 +53,8 @@ class ShortestPath {
   DISALLOW_COPY_AND_ASSIGN(ShortestPath);
 };
 
-class ExclusionSet {
+// A set of constraints.
+class ConstraintSet {
  public:
   void AddToExcludeLinks(const GraphLinkSet* set) {
     link_sets_to_exclude_.emplace_back(set);
@@ -95,6 +96,8 @@ class ExclusionSet {
   // Links/nodes that will be excluded from the graph.
   std::vector<const GraphLinkSet*> link_sets_to_exclude_;
   std::vector<const GraphNodeSet*> node_sets_to_exclude_;
+
+  std::vector<>
 };
 
 // A directed graph.
@@ -158,6 +161,10 @@ class SubGraph {
   // The set of nodes that are reachable from a given node.
   GraphNodeSet ReachableNodes(GraphNodeIndex src) const;
 
+  const DirectedGraph* parent() const { return parent_; }
+
+  const ExclusionSet* exclusion_set() const { return exclusion_set_; }
+
  private:
   void PathsRecursive(Delay max_distance, size_t max_hops, GraphNodeIndex at,
                       GraphNodeIndex dst, PathCallback path_callback,
@@ -174,52 +181,43 @@ class SubGraph {
   const ExclusionSet* exclusion_set_;
 };
 
-//// Returns the single shortest path that goes through a series of links in the
-//// given order or returns an empty path if no such path exists.
-// LinkSequence WaypointShortestPath(const GraphSearchAlgorithmConfig& config,
-//                                  Links::const_iterator waypoints_from,
-//                                  Links::const_iterator waypoints_to,
-//                                  GraphNodeIndex src, GraphNodeIndex dst,
-//                                  const DirectedGraph* graph);
-//
-//// K shortest paths that optionally go through a set of waypoints.
-// class KShortestPaths : public GraphSearchAlgorithm {
-// public:
-//  KShortestPaths(const GraphSearchAlgorithmConfig& config,
-//                 const Links& waypoints, GraphNodeIndex src, GraphNodeIndex
-//                 dst,
-//                 const DirectedGraph* graph);
-//
-//  // Returns the next path.
-//  LinkSequence NextPath();
-//
-// private:
-//  using PathAndStartIndex = std::pair<LinkSequence, size_t>;
-//
-//  // Returns true if prefix_path[0:index] == path[0:index]
-//  static bool HasPrefix(const Links& path, const Links& prefix);
-//
-//  // Returns a set of links that contains: for any path in k_paths_ that
-//  starts
-//  // with the same links as root_path pick the next link -- the one after.
-//  void GetLinkExclusionSet(const Links& root_path, GraphLinkSet* out);
-//
-//  // Waypoints.
-//  const std::vector<GraphLinkIndex> waypoints_;
-//
-//  // The source.
-//  GraphNodeIndex src_;
-//
-//  // The destination.
-//  GraphNodeIndex dst_;
-//
-//  // Stores the K shortest paths in order.
-//  std::vector<PathAndStartIndex> k_paths_;
-//
-//  // Stores candidates for K shortest paths.
-//  std::priority_queue<PathAndStartIndex, std::vector<PathAndStartIndex>,
-//                      std::greater<PathAndStartIndex>> candidates_;
-//};
+// Generates shortest paths in increasing order.
+class KShortestPathsGenerator {
+ public:
+  KShortestPathsGenerator(GraphNodeIndex src, GraphNodeIndex dst,
+                          const SubGraph* sub_graph)
+      : sub_graph_(sub_graph) {}
+
+  // Returns the Kth shortest path.
+  LinkSequence KthShortestPath(size_t k);
+
+ private:
+  using PathAndStartIndex = std::pair<LinkSequence, size_t>;
+
+  // Adds the next shortest paths to the K shortest paths list. Returns true if
+  // no more shortest paths exist.
+  bool NextPath();
+
+  // Returns a set of links that contains: for any path in k_paths_ that starts
+  // with the same links as root_path pick the next link -- the one after.
+  void GetLinkExclusionSet(const Links& root_path, GraphLinkSet* out);
+
+  // Stores the K shortest paths in order.
+  std::vector<PathAndStartIndex> k_paths_;
+
+  // Stores candidates for K shortest paths.
+  std::priority_queue<PathAndStartIndex, std::vector<PathAndStartIndex>,
+                      std::greater<PathAndStartIndex>> candidates_;
+
+  // The source.
+  GraphNodeIndex src_;
+
+  // The destination.
+  GraphNodeIndex dst_;
+
+  // The graph.
+  const SubGraph* sub_graph_;
+};
 
 }  // namespace nc
 }  // namespace ncode

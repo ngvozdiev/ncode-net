@@ -370,103 +370,110 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
 //      src_(src),
 //      dst_(dst) {}
 //
-// LinkSequence KShortestPaths::NextPath() {
-//  const GraphStorage* graph_storage = graph_->graph_storage();
-//  if (k_paths_.empty()) {
-//    LinkSequence path = WaypointShortestPath(
-//        config_, waypoints_.begin(), waypoints_.end(), src_, dst_, graph_);
-//    k_paths_.emplace_back(path, 0);
-//    return path;
-//  }
-//
-//  const PathAndStartIndex& last_path_and_start_index = k_paths_.back();
-//  const LinkSequence& last_path = last_path_and_start_index.first;
-//  const Links& last_path_links = last_path.links();
-//  size_t start_index = last_path_and_start_index.second;
-//
-//  GraphSearchAlgorithmConfig config_copy = config_;
-//  GraphLinkSet links_to_exclude;
-//  GraphNodeSet nodes_to_exclude;
-//  config_copy.AddToExcludeLinks(&links_to_exclude);
-//  config_copy.AddToExcludeNodes(&nodes_to_exclude);
-//
-//  Links root_path;
-//  Links::const_iterator waypoints_from = waypoints_.begin();
-//  for (size_t i = 0; i < last_path_links.size(); ++i) {
-//    GraphLinkIndex link_index = last_path_links[i];
-//    const GraphLink* link = graph_storage->GetLink(link_index);
-//    GraphNodeIndex spur_node = link->src();
-//    if (i < start_index) {
-//      nodes_to_exclude.Insert(spur_node);
-//      root_path.emplace_back(link_index);
-//
-//      if (waypoints_from != waypoints_.end() && link_index == *waypoints_from)
-//      {
-//        std::advance(waypoints_from, 1);
-//      }
-//      continue;
-//    }
-//
-//    GetLinkExclusionSet(root_path, &links_to_exclude);
-//    LinkSequence spur_path = WaypointShortestPath(
-//        config_copy, waypoints_from, waypoints_.end(), spur_node, dst_,
-//        graph_);
-//    if (!spur_path.empty()) {
-//      const Links& spur_path_links = spur_path.links();
-//
-//      Links candidate_links = root_path;
-//      candidate_links.insert(candidate_links.end(), spur_path_links.begin(),
-//                             spur_path_links.end());
-//      LinkSequence candidate_path(
-//          candidate_links, TotalDelayOfLinks(candidate_links, graph_storage));
-//      candidates_.emplace(candidate_path, i);
-//    }
-//
-//    links_to_exclude.Clear();
-//    nodes_to_exclude.Insert(spur_node);
-//    root_path.emplace_back(link_index);
-//    if (waypoints_from != waypoints_.end() && link_index == *waypoints_from) {
-//      std::advance(waypoints_from, 1);
-//    }
-//  }
-//
-//  if (candidates_.empty()) {
-//    return {};
-//  }
-//
-//  PathAndStartIndex min_candidate = candidates_.top();
-//  candidates_.pop();
-//  k_paths_.emplace_back(min_candidate);
-//  return min_candidate.first;
-//}
-//
-// bool KShortestPaths::HasPrefix(const Links& path, const Links& prefix) {
-//  CHECK(prefix.size() <= path.size()) << prefix.size() << " vs " <<
-//  path.size();
-//  for (size_t i = 0; i < prefix.size(); ++i) {
-//    if (path[i] != prefix[i]) {
-//      return false;
-//    }
-//  }
-//
-//  return true;
-//}
-//
-// void KShortestPaths::GetLinkExclusionSet(const Links& root_path,
-//                                         GraphLinkSet* out) {
-//  for (const PathAndStartIndex& k_path_and_start_index : k_paths_) {
-//    const LinkSequence& k_path = k_path_and_start_index.first;
-//    if (k_path.size() < root_path.size()) {
-//      continue;
-//    }
-//
-//    const Links& k_path_links = k_path.links();
-//    if (HasPrefix(k_path_links, root_path)) {
-//      CHECK(k_path_links.size() > root_path.size());
-//      out->Insert(k_path_links[root_path.size()]);
-//    }
-//  }
-//}
+
+bool KShortestPathsGenerator::NextPath() {
+  const DirectedGraph* parent = sub_graph_->parent();
+  const GraphStorage* graph_storage = parent->graph_storage();
+  if (k_paths_.empty()) {
+    LinkSequence path = sub_graph_->ShortestPath(src_, dst_);
+    k_paths_.emplace_back(path, 0);
+    return true;
+  }
+
+  const PathAndStartIndex& last_path_and_start_index = k_paths_.back();
+  const LinkSequence& last_path = last_path_and_start_index.first;
+  const Links& last_path_links = last_path.links();
+  size_t start_index = last_path_and_start_index.second;
+
+  ExclusionSet exclusion_set_copy = *(sub_graph_->exclusion_set());
+  GraphLinkSet links_to_exclude;
+  GraphNodeSet nodes_to_exclude;
+  exclusion_set_copy.AddToExcludeLinks(&links_to_exclude);
+  exclusion_set_copy.AddToExcludeNodes(&nodes_to_exclude);
+
+  Links root_path;
+  for (size_t i = 0; i < last_path_links.size(); ++i) {
+    GraphLinkIndex link_index = last_path_links[i];
+    const GraphLink* link = graph_storage->GetLink(link_index);
+    GraphNodeIndex spur_node = link->src();
+    if (i < start_index) {
+      nodes_to_exclude.Insert(spur_node);
+      root_path.emplace_back(link_index);
+      continue;
+    }
+
+    GetLinkExclusionSet(root_path, &links_to_exclude);
+    SubGraph new_sub_graph(parent, &exclusion_set_copy);
+
+    LinkSequence spur_path = new_sub_graph.ShortestPath(spur_node, dst_);
+    if (!spur_path.empty()) {
+      const Links& spur_path_links = spur_path.links();
+
+      Links candidate_links = root_path;
+      candidate_links.insert(candidate_links.end(), spur_path_links.begin(),
+                             spur_path_links.end());
+      LinkSequence candidate_path(
+          candidate_links, TotalDelayOfLinks(candidate_links, graph_storage));
+      candidates_.emplace(candidate_path, i);
+    }
+
+    links_to_exclude.Clear();
+    nodes_to_exclude.Insert(spur_node);
+    root_path.emplace_back(link_index);
+  }
+
+  if (candidates_.empty()) {
+    return false;
+  }
+
+  PathAndStartIndex min_candidate = candidates_.top();
+  candidates_.pop();
+  k_paths_.emplace_back(min_candidate);
+  return true;
+}
+
+LinkSequence KShortestPathsGenerator::KthShortestPath(size_t k) {
+  if (k < k_paths_.size()) {
+    return k_paths_[k].first;
+  }
+
+  size_t delta = k + 1 - k_paths_.size();
+  for (size_t i = 0; i < delta; ++i) {
+    if (!NextPath()) {
+      return {};
+    }
+  }
+
+  return k_paths_.back().first;
+}
+
+// Returns true if prefix_path[0:index] == path[0:index]
+static bool HasPrefix(const Links& path, const Links& prefix) {
+  CHECK(prefix.size() <= path.size()) << prefix.size() << " vs " << path.size();
+  for (size_t i = 0; i < prefix.size(); ++i) {
+    if (path[i] != prefix[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void KShortestPathsGenerator::GetLinkExclusionSet(const Links& root_path,
+                                                  GraphLinkSet* out) {
+  for (const PathAndStartIndex& k_path_and_index : k_paths_) {
+    const LinkSequence& k_path = k_path_and_index.first;
+    if (k_path.size() < root_path.size()) {
+      continue;
+    }
+
+    const Links& k_path_links = k_path.links();
+    if (HasPrefix(k_path_links, root_path)) {
+      CHECK(k_path_links.size() > root_path.size());
+      out->Insert(k_path_links[root_path.size()]);
+    }
+  }
+}
 
 }  // namespace nc
 }  // namespace ncode
