@@ -104,13 +104,13 @@ std::vector<LinkSequence> NodePairPathCache::PathsKHopsFromShortest(
 std::vector<LinkSequence> NodePairPathCache::AllPaths(size_t max_hops) const {
   std::vector<LinkSequence> out;
 
-  DFS dfs({}, graph_);
-  dfs.Paths(std::get<0>(key_), std::get<1>(key_), Delay::max(), max_hops,
-            [this, &out](const LinkSequence& path) {
-              if (constraint_->PathComplies(path)) {
-                out.emplace_back(path);
-              }
-            });
+  //  DFS dfs({}, graph_);
+  //  dfs.Paths(std::get<0>(key_), std::get<1>(key_), Delay::max(), max_hops,
+  //            [this, &out](const LinkSequence& path) {
+  //              if (constraint_->PathComplies(path)) {
+  //                out.emplace_back(path);
+  //              }
+  //            });
   std::sort(out.begin(), out.end());
   return out;
 }

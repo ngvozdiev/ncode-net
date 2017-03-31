@@ -22,6 +22,11 @@ class ShortestPath {
   // Returns the shortest path to the destination.
   LinkSequence GetPath(GraphNodeIndex dst) const;
 
+  // Returns the distance from the source to a destination.
+  Delay GetPathDistance(GraphNodeIndex dst) const {
+    return min_delays_[dst].distance;
+  }
+
  private:
   struct DistanceFromSource {
     DistanceFromSource() : distance(Delay::max()) {}
@@ -44,9 +49,11 @@ class ShortestPath {
 
   // Graph storage.
   const GraphStorage* graph_storage_;
+
+  DISALLOW_COPY_AND_ASSIGN(ShortestPath);
 };
 
-class GraphSearchAlgorithmExclusionSet {
+class ExclusionSet {
  public:
   void AddToExcludeLinks(const GraphLinkSet* set) {
     link_sets_to_exclude_.emplace_back(set);
@@ -108,18 +115,16 @@ class DirectedGraph {
 
   // Returns the shortest path from 'from 'to 'to'. This considers the entire
   // graph so it is a lower bound.
-  const LinkSequence& ShortestPath(GraphNodeIndex from,
-                                   GraphNodeIndex to) const;
+  LinkSequence ShortestPath(GraphNodeIndex from, GraphNodeIndex to) const;
 
-  // Same as above, but can exclude arbitrary nodes/links from the search.
-  LinkSequence ShortestPathWithConstraints(
-      const GraphSearchAlgorithmExclusionSet& to_exclude, GraphNodeIndex from,
-      GraphNodeIndex to) const;
+  // Returns the delay of the shortest paths between 'from' and 'to'.
+  Delay ShortestPathDelay(GraphNodeIndex from, GraphNodeIndex to) const;
 
  private:
   void ConstructAdjacencyList();
 
-  // Runs N instances of single-source shortest path and populates 'distances_'.
+  // Runs N instances of single-source shortest path and populates
+  // 'shortest_paths_'.
   void CacheSP();
 
   const GraphStorage* graph_storage_;
@@ -131,125 +136,27 @@ class DirectedGraph {
   // True if there are no multiple edges between any two nodes.
   bool simple_;
 
-  // Caches the best possible distance between two nodes.
-  GraphNodeMap<GraphNodeMap<LinkSequence>> shortest_paths_;
+  // Shortest path trees, per source.
+  GraphNodeMap<std::unique_ptr<net::ShortestPath>> shortest_paths_;
 };
 
-class GraphSearchAlgorithm {
- protected:
-  GraphSearchAlgorithm(const GraphSearchAlgorithmConfig& config,
-                       const DirectedGraph* graph);
-
-  // The graph.
-  const DirectedGraph* graph_;
-
-  // Configuration for the algorithm.
-  const GraphSearchAlgorithmConfig config_;
-};
-
-// Computes shortest paths between all pairs of nodes, can also be used to
-// figure out if the graph is partitioned.
-class AllPairShortestPath : public GraphSearchAlgorithm {
- public:
-  AllPairShortestPath(const GraphSearchAlgorithmConfig& config,
-                      const DirectedGraph* graph)
-      : GraphSearchAlgorithm(config, graph) {
-    CHECK(graph->IsSimple()) << "All pairs SP will only work on simple graphs";
-    ComputePaths();
-  }
-
-  // Returns the shortest path between src and dst. The second return value will
-  // be set to false if the path fails to avoid all depref links/nodes,
-  // otherwise unchanged.
-  LinkSequence GetPath(GraphNodeIndex src, GraphNodeIndex dst) const;
-
-  // Returns the length of the shortest path between src and dst.
-  Delay GetDistance(GraphNodeIndex src, GraphNodeIndex dst) const;
-
- private:
-  static constexpr Delay kMaxDistance = Delay::max();
-
-  struct SPData {
-    SPData() : distance(kMaxDistance) {}
-
-    // Distance between the 2 endpoints.
-    Delay distance;
-
-    // Successor in the SP.
-    GraphLinkIndex next_link;
-    GraphNodeIndex next_node;
-  };
-
-  // Populates data_.
-  void ComputePaths();
-
-  // Distances to the destination.
-  GraphNodeMap<GraphNodeMap<SPData>> data_;
-};
-
-// Returns the single shortest path that goes through a series of links in the
-// given order or returns an empty path if no such path exists.
-LinkSequence WaypointShortestPath(const GraphSearchAlgorithmConfig& config,
-                                  Links::const_iterator waypoints_from,
-                                  Links::const_iterator waypoints_to,
-                                  GraphNodeIndex src, GraphNodeIndex dst,
-                                  const DirectedGraph* graph);
-
-// K shortest paths that optionally go through a set of waypoints.
-class KShortestPaths : public GraphSearchAlgorithm {
- public:
-  KShortestPaths(const GraphSearchAlgorithmConfig& config,
-                 const Links& waypoints, GraphNodeIndex src, GraphNodeIndex dst,
-                 const DirectedGraph* graph);
-
-  // Returns the next path.
-  LinkSequence NextPath();
-
- private:
-  using PathAndStartIndex = std::pair<LinkSequence, size_t>;
-
-  // Returns true if prefix_path[0:index] == path[0:index]
-  static bool HasPrefix(const Links& path, const Links& prefix);
-
-  // Returns a set of links that contains: for any path in k_paths_ that starts
-  // with the same links as root_path pick the next link -- the one after.
-  void GetLinkExclusionSet(const Links& root_path, GraphLinkSet* out);
-
-  // Waypoints.
-  const std::vector<GraphLinkIndex> waypoints_;
-
-  // The source.
-  GraphNodeIndex src_;
-
-  // The destination.
-  GraphNodeIndex dst_;
-
-  // Stores the K shortest paths in order.
-  std::vector<PathAndStartIndex> k_paths_;
-
-  // Stores candidates for K shortest paths.
-  std::priority_queue<PathAndStartIndex, std::vector<PathAndStartIndex>,
-                      std::greater<PathAndStartIndex>> candidates_;
-};
-
-// Simple depth-limited DFS.
-class DFS : public GraphSearchAlgorithm {
+// Subset of a directed graph.
+class SubGraph {
  public:
   using PathCallback = std::function<void(const LinkSequence&)>;
 
-  // If the last argument is true will compute an all-pairs shortest path and
-  // use the shortest distance from any node to the destination to prune paths
-  // that are too long early. The downside is that it may be slower and more
-  // memory hungry, especially if you are only interested in reachability.
-  DFS(const GraphSearchAlgorithmConfig& config, const DirectedGraph* graph,
-      bool prune_distance = true);
+  SubGraph(const DirectedGraph* parent, const ExclusionSet* exclusion_set)
+      : parent_(parent), exclusion_set_(exclusion_set) {}
+
+  // Shortest path between two nodes.
+  LinkSequence ShortestPath(GraphNodeIndex from, GraphNodeIndex to) const;
 
   // Calls a callback on all paths between a source and a destination.
-  void Paths(GraphNodeIndex src, GraphNodeIndex dst, Delay max_distance,
-             size_t max_hops, PathCallback path_callback) const;
+  void Paths(GraphNodeIndex src, GraphNodeIndex dst, PathCallback path_callback,
+             Delay max_distance, size_t max_hops) const;
 
   // The set of nodes that are reachable from a given node.
-  GraphNodeSet ReachableNodes(GraphNodeIndex src);
+  GraphNodeSet ReachableNodes(GraphNodeIndex src) const;
 
  private:
   void PathsRecursive(Delay max_distance, size_t max_hops, GraphNodeIndex at,
@@ -260,12 +167,59 @@ class DFS : public GraphSearchAlgorithm {
   void ReachableNodesRecursive(GraphNodeIndex at,
                                GraphNodeSet* nodes_seen) const;
 
-  // The graph storage.
-  const GraphStorage* storage_;
+  // The complete graph.
+  const DirectedGraph* parent_;
 
-  // The shortest paths are used to prune the DFS like in A*.
-  std::unique_ptr<AllPairShortestPath> all_pair_sp_;
+  // Nodes/links to exclude.
+  const ExclusionSet* exclusion_set_;
 };
+
+//// Returns the single shortest path that goes through a series of links in the
+//// given order or returns an empty path if no such path exists.
+// LinkSequence WaypointShortestPath(const GraphSearchAlgorithmConfig& config,
+//                                  Links::const_iterator waypoints_from,
+//                                  Links::const_iterator waypoints_to,
+//                                  GraphNodeIndex src, GraphNodeIndex dst,
+//                                  const DirectedGraph* graph);
+//
+//// K shortest paths that optionally go through a set of waypoints.
+// class KShortestPaths : public GraphSearchAlgorithm {
+// public:
+//  KShortestPaths(const GraphSearchAlgorithmConfig& config,
+//                 const Links& waypoints, GraphNodeIndex src, GraphNodeIndex
+//                 dst,
+//                 const DirectedGraph* graph);
+//
+//  // Returns the next path.
+//  LinkSequence NextPath();
+//
+// private:
+//  using PathAndStartIndex = std::pair<LinkSequence, size_t>;
+//
+//  // Returns true if prefix_path[0:index] == path[0:index]
+//  static bool HasPrefix(const Links& path, const Links& prefix);
+//
+//  // Returns a set of links that contains: for any path in k_paths_ that
+//  starts
+//  // with the same links as root_path pick the next link -- the one after.
+//  void GetLinkExclusionSet(const Links& root_path, GraphLinkSet* out);
+//
+//  // Waypoints.
+//  const std::vector<GraphLinkIndex> waypoints_;
+//
+//  // The source.
+//  GraphNodeIndex src_;
+//
+//  // The destination.
+//  GraphNodeIndex dst_;
+//
+//  // Stores the K shortest paths in order.
+//  std::vector<PathAndStartIndex> k_paths_;
+//
+//  // Stores candidates for K shortest paths.
+//  std::priority_queue<PathAndStartIndex, std::vector<PathAndStartIndex>,
+//                      std::greater<PathAndStartIndex>> candidates_;
+//};
 
 }  // namespace nc
 }  // namespace ncode

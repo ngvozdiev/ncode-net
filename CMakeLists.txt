@@ -55,15 +55,15 @@ include_directories(${PROTOBUF_INCLUDE_DIRS} ${PCAP_INCLUDE_DIR} ${CMAKE_BINARY_
 ################################
 PROTOBUF_GENERATE_CPP(PROTO_NET_SRCS PROTO_NET_HDRS src/net.proto)
 set_property(SOURCE ${PROTO_NET_SRCS} APPEND_STRING PROPERTY COMPILE_FLAGS "-Wno-extended-offsetof")
-set(NET_HEADER_FILES src/net_common.h src/net_gen.h src/pcap.h src/algorithm.h src/constraint.h src/path_cache.h ${PROTO_NET_HDRS})
-add_library(ncode_net SHARED src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc src/constraint.cc src/path_cache.cc ${PROTO_NET_SRCS} ${NET_HEADER_FILES})
+set(NET_HEADER_FILES src/net_common.h src/net_gen.h src/pcap.h src/algorithm.h src/path_cache.h ${PROTO_NET_HDRS})
+add_library(ncode_net SHARED src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc src/path_cache.cc ${PROTO_NET_SRCS} ${NET_HEADER_FILES})
 target_link_libraries(ncode_net ${PCAP_LIBRARY} ${PROTOBUF_LIBRARIES} ncode_common)
 
 if (NOT NCODE_NET_DISABLE_TESTS)
   add_test_exec(net_common_test src/net_common_test.cc ncode_net)
   add_test_exec(net_gen_test src/net_gen_test.cc ncode_net)
   add_test_exec(net_algorithm_test src/algorithm_test.cc ncode_net)
-  add_test_exec(net_constraint_test src/constraint_test.cc ncode_net)
+#  add_test_exec(net_constraint_test src/constraint_test.cc ncode_net)
   add_test_exec(net_path_cache_test src/path_cache_test.cc ncode_net)
 endif()
 
