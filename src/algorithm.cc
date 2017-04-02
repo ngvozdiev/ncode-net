@@ -100,13 +100,13 @@ void SubGraph::PathsRecursive(Delay max_distance, size_t max_hops,
   const GraphStorage* storage = parent_->graph_storage();
 
   for (GraphLinkIndex out_link : outgoing_links) {
-    if (exclusion_set_->CanExcludeLink(out_link)) {
+    if (constraints_->CanExcludeLink(out_link)) {
       continue;
     }
 
     const GraphLink* next_link = storage->GetLink(out_link);
     GraphNodeIndex next_hop = next_link->dst();
-    if (exclusion_set_->CanExcludeNode(next_hop)) {
+    if (constraints_->CanExcludeNode(next_hop)) {
       continue;
     }
 
@@ -133,13 +133,13 @@ void SubGraph::ReachableNodesRecursive(GraphNodeIndex at,
   const GraphStorage* storage = parent_->graph_storage();
 
   for (GraphLinkIndex out_link : outgoing_links) {
-    if (exclusion_set_->CanExcludeLink(out_link)) {
+    if (constraints_->CanExcludeLink(out_link)) {
       continue;
     }
 
     const GraphLink* next_link = storage->GetLink(out_link);
     GraphNodeIndex next_hop = next_link->dst();
-    if (exclusion_set_->CanExcludeNode(next_hop)) {
+    if (constraints_->CanExcludeNode(next_hop)) {
       continue;
     }
 
@@ -171,6 +171,10 @@ static Links RecoverPath(GraphNodeIndex src, GraphNodeIndex dst,
 
 LinkSequence ShortestPath::GetPath(GraphNodeIndex dst) const {
   Links links = RecoverPath(src_, dst, previous_, graph_storage_);
+  if (links.empty()) {
+    return {};
+  }
+
   Delay distance = min_delays_[dst].distance;
   return {links, distance};
 }
@@ -238,6 +242,10 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
   cost_so_far[src] = Delay::zero();
   frontier.emplace(Delay::zero(), src);
 
+  if (constraints_->CanExcludeNode(src) || constraints_->CanExcludeNode(dst)) {
+    return {};
+  }
+
   GraphNodeMap<GraphLinkIndex> came_from;
   came_from.Resize(graph_storage->NodeCount());
   while (!frontier.empty()) {
@@ -259,8 +267,15 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
     const std::vector<GraphLinkIndex>& neighbors =
         adjacency_list.UnsafeAccess(current);
     for (GraphLinkIndex out_link : neighbors) {
+      if (constraints_->CanExcludeLink(out_link)) {
+        continue;
+      }
+
       const GraphLink* out_link_ptr = graph_storage->GetLink(out_link);
       GraphNodeIndex neighbor_node = out_link_ptr->dst();
+      if (constraints_->CanExcludeNode(neighbor_node)) {
+        continue;
+      }
 
       const Delay link_delay = out_link_ptr->delay();
       const Delay new_cost = cost_so_far[current] + link_delay;
@@ -275,101 +290,12 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
   }
 
   Links links = RecoverPath(src, dst, came_from, graph_storage);
+  if (links.empty()) {
+    return {};
+  }
+
   return {links, graph_storage};
 }
-
-// static void AddFromPath(const DirectedGraph& graph, const LinkSequence& path,
-//                        Links* out, GraphNodeSet* nodes) {
-//  const GraphStorage* graph_storage = graph.graph_storage();
-//  for (GraphLinkIndex link_in_path : path.links()) {
-//    const GraphLink* link_ptr = graph_storage->GetLink(link_in_path);
-//
-//    out->emplace_back(link_in_path);
-//    nodes->Insert(link_ptr->src());
-//    nodes->Insert(link_ptr->dst());
-//  }
-//}
-
-// LinkSequence WaypointShortestPath(const GraphSearchAlgorithmConfig& config,
-//                                  Links::const_iterator waypoints_from,
-//                                  Links::const_iterator waypoints_to,
-//                                  GraphNodeIndex src, GraphNodeIndex dst,
-//                                  const DirectedGraph* graph) {
-//  CHECK(src != dst);
-//  const GraphStorage* graph_storage = graph->graph_storage();
-//
-//  // As new paths are discovered nodes will be added to this set to make sure
-//  // the next paths do not include any nodes from previous paths.
-//  GraphSearchAlgorithmConfig config_copy = config;
-//  GraphNodeSet nodes_to_exclude;
-//  config_copy.AddToExcludeNodes(&nodes_to_exclude);
-//
-//  // The shortest path is the combination of the shortest paths between the
-//  // nodes that we have to visit.
-//  GraphNodeIndex current_point = src;
-//  Links path;
-//  Delay total_delay = Delay::zero();
-//  for (auto it = waypoints_from; it < waypoints_to; ++it) {
-//    // The next SP is that between the current point and the source of the
-//    // edge, the path is then concatenated with the edge and the current point
-//    // is set to the end of the edge.
-//    GraphLinkIndex link_index = *it;
-//    const GraphLink* link_ptr = graph_storage->GetLink(link_index);
-//
-//    // If the waypoint link is in the excluded set we cannot find a path
-//    through
-//    // the waypoints and we return an empty path.
-//    if (config_copy.CanExcludeLink(link_index)) {
-//      return {};
-//    }
-//
-//    // If the source of the waypoint is the same as the src, but this is not
-//    // the first waypoint, obviously there is nothing we can do.
-//    if (src == link_ptr->src() && it != waypoints_from) {
-//      return {};
-//    }
-//
-//    if (src != link_ptr->src() && current_point != link_ptr->src()) {
-//      ShortestPath sp(config_copy, current_point, graph);
-//      LinkSequence pathlet = sp.GetPath(link_ptr->src());
-//      pathlet.ToString(graph_storage);
-//      if (pathlet.empty()) {
-//        return {};
-//      }
-//
-//      AddFromPath(*graph, pathlet, &path, &nodes_to_exclude);
-//      total_delay += pathlet.delay();
-//    }
-//
-//    path.emplace_back(link_index);
-//    total_delay += link_ptr->delay();
-//    current_point = link_ptr->dst();
-//  }
-//
-//  if (current_point != dst) {
-//    // Have to connect the last hop with the destination.
-//    ShortestPath sp(config_copy, current_point, graph);
-//    LinkSequence pathlet = sp.GetPath(dst);
-//    if (pathlet.empty()) {
-//      return {};
-//    }
-//
-//    AddFromPath(*graph, pathlet, &path, &nodes_to_exclude);
-//    total_delay += pathlet.delay();
-//  }
-//
-//  return LinkSequence(path, total_delay);
-//}
-
-// KShortestPaths::KShortestPaths(const GraphSearchAlgorithmConfig& config,
-//                               const std::vector<GraphLinkIndex>& waypoints,
-//                               GraphNodeIndex src, GraphNodeIndex dst,
-//                               const DirectedGraph* graph)
-//    : GraphSearchAlgorithm(config, graph),
-//      waypoints_(waypoints),
-//      src_(src),
-//      dst_(dst) {}
-//
 
 bool KShortestPathsGenerator::NextPath() {
   const DirectedGraph* parent = sub_graph_->parent();
@@ -385,11 +311,11 @@ bool KShortestPathsGenerator::NextPath() {
   const Links& last_path_links = last_path.links();
   size_t start_index = last_path_and_start_index.second;
 
-  ExclusionSet exclusion_set_copy = *(sub_graph_->exclusion_set());
+  ConstraintSet constraint_set_copy = *(sub_graph_->exclusion_set());
   GraphLinkSet links_to_exclude;
   GraphNodeSet nodes_to_exclude;
-  exclusion_set_copy.AddToExcludeLinks(&links_to_exclude);
-  exclusion_set_copy.AddToExcludeNodes(&nodes_to_exclude);
+  constraint_set_copy.AddToExcludeLinks(&links_to_exclude);
+  constraint_set_copy.AddToExcludeNodes(&nodes_to_exclude);
 
   Links root_path;
   for (size_t i = 0; i < last_path_links.size(); ++i) {
@@ -403,7 +329,7 @@ bool KShortestPathsGenerator::NextPath() {
     }
 
     GetLinkExclusionSet(root_path, &links_to_exclude);
-    SubGraph new_sub_graph(parent, &exclusion_set_copy);
+    SubGraph new_sub_graph(parent, &constraint_set_copy);
 
     LinkSequence spur_path = new_sub_graph.ShortestPath(spur_node, dst_);
     if (!spur_path.empty()) {

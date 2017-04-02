@@ -340,8 +340,7 @@ class GraphStorage {
   // even if the original graph is simple. This function will also assign names
   // to cluster nodes. For example if a cluster combines nodes N1 and N2 the
   // name of the cluster node will be C_N1_N2. Each node from this graph should
-  // be contained in exactly one cluster. There is 1-to-1 relationship between
-  // real links and clustered links, which is stored in the last argument.
+  // be contained in exactly one cluster.
   std::unique_ptr<GraphStorage> ClusterNodes(
       const std::vector<GraphNodeSet>& clusters,
       GraphLinkMap<GraphLinkIndex>* real_to_clustered_links,

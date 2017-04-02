@@ -24,7 +24,14 @@ class ShortestPath {
 
   // Returns the distance from the source to a destination.
   Delay GetPathDistance(GraphNodeIndex dst) const {
-    return min_delays_[dst].distance;
+    // This is the tree that starts at 'src_'. It may be possible that there are
+    // nodes in the graph that are not reachable from 'src_'. Those nodes will
+    // not have a distance set in 'min_delays_'.
+    if (!min_delays_.HasValue(dst)) {
+      return Delay::max();
+    }
+
+    return min_delays_.UnsafeAccess(dst).distance;
   }
 
  private:
@@ -84,20 +91,26 @@ class ConstraintSet {
     return false;
   }
 
-  std::vector<const GraphLinkSet*>& link_sets_to_exclude() {
+  const std::vector<const GraphLinkSet*>& link_sets_to_exclude() const {
     return link_sets_to_exclude_;
   };
 
-  std::vector<const GraphNodeSet*>& node_sets_to_exclude() {
+  const std::vector<const GraphNodeSet*>& node_sets_to_exclude() const {
     return node_sets_to_exclude_;
   };
+
+  const std::vector<const GraphNodeSet*>& visit_order() const {
+    return visit_order_;
+  }
 
  private:
   // Links/nodes that will be excluded from the graph.
   std::vector<const GraphLinkSet*> link_sets_to_exclude_;
   std::vector<const GraphNodeSet*> node_sets_to_exclude_;
 
-  std::vector<>
+  // All paths will have to visit at least one node from each set. The sets
+  // should be visited in the order they appear here.
+  std::vector<const GraphNodeSet*> visit_order_;
 };
 
 // A directed graph.
@@ -148,22 +161,23 @@ class SubGraph {
  public:
   using PathCallback = std::function<void(const LinkSequence&)>;
 
-  SubGraph(const DirectedGraph* parent, const ExclusionSet* exclusion_set)
-      : parent_(parent), exclusion_set_(exclusion_set) {}
+  SubGraph(const DirectedGraph* parent, const ConstraintSet* constraints)
+      : parent_(parent), constraints_(constraints) {}
 
   // Shortest path between two nodes.
   LinkSequence ShortestPath(GraphNodeIndex from, GraphNodeIndex to) const;
 
   // Calls a callback on all paths between a source and a destination.
   void Paths(GraphNodeIndex src, GraphNodeIndex dst, PathCallback path_callback,
-             Delay max_distance, size_t max_hops) const;
+             Delay max_distance = Delay::max(),
+             size_t max_hops = std::numeric_limits<size_t>::max()) const;
 
   // The set of nodes that are reachable from a given node.
   GraphNodeSet ReachableNodes(GraphNodeIndex src) const;
 
   const DirectedGraph* parent() const { return parent_; }
 
-  const ExclusionSet* exclusion_set() const { return exclusion_set_; }
+  const ConstraintSet* exclusion_set() const { return constraints_; }
 
  private:
   void PathsRecursive(Delay max_distance, size_t max_hops, GraphNodeIndex at,
@@ -178,7 +192,7 @@ class SubGraph {
   const DirectedGraph* parent_;
 
   // Nodes/links to exclude.
-  const ExclusionSet* exclusion_set_;
+  const ConstraintSet* constraints_;
 };
 
 // Generates shortest paths in increasing order.
@@ -186,7 +200,7 @@ class KShortestPathsGenerator {
  public:
   KShortestPathsGenerator(GraphNodeIndex src, GraphNodeIndex dst,
                           const SubGraph* sub_graph)
-      : sub_graph_(sub_graph) {}
+      : src_(src), dst_(dst), sub_graph_(sub_graph) {}
 
   // Returns the Kth shortest path.
   LinkSequence KthShortestPath(size_t k);
