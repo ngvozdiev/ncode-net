@@ -252,6 +252,7 @@ class LinkSequence {
 
   friend bool operator<(const LinkSequence& a, const LinkSequence& b);
   friend bool operator==(const LinkSequence& a, const LinkSequence& b);
+  friend bool operator!=(const LinkSequence& a, const LinkSequence& b);
 
  private:
   // The links in this sequence.

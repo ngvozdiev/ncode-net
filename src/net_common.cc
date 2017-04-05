@@ -433,6 +433,10 @@ bool operator==(const LinkSequence& lhs, const LinkSequence& rhs) {
   return lhs.links_ == rhs.links_;
 }
 
+bool operator!=(const LinkSequence& lhs, const LinkSequence& rhs) {
+  return lhs.links_ != rhs.links_;
+}
+
 std::string GraphPath::ToString() const {
   return link_sequence_.ToString(storage_);
 }

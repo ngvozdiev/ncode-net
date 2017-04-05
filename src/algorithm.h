@@ -10,56 +10,6 @@
 namespace nc {
 namespace net {
 
-// Single source shortest path.
-class ShortestPath {
- public:
-  ShortestPath(const GraphNodeMap<std::vector<GraphLinkIndex>>* adj_list,
-               const GraphStorage* graph_storage, GraphNodeIndex src)
-      : src_(src), adj_list_(adj_list), graph_storage_(graph_storage) {
-    ComputePaths();
-  }
-
-  // Returns the shortest path to the destination.
-  LinkSequence GetPath(GraphNodeIndex dst) const;
-
-  // Returns the distance from the source to a destination.
-  Delay GetPathDistance(GraphNodeIndex dst) const {
-    // This is the tree that starts at 'src_'. It may be possible that there are
-    // nodes in the graph that are not reachable from 'src_'. Those nodes will
-    // not have a distance set in 'min_delays_'.
-    if (!min_delays_.HasValue(dst)) {
-      return Delay::max();
-    }
-
-    return min_delays_.UnsafeAccess(dst).distance;
-  }
-
- private:
-  struct DistanceFromSource {
-    DistanceFromSource() : distance(Delay::max()) {}
-    Delay distance;
-  };
-
-  void ComputePaths();
-
-  // The source.
-  GraphNodeIndex src_;
-
-  // For each node, the link that leads to it in the SP tree.
-  GraphNodeMap<GraphLinkIndex> previous_;
-
-  // Delays from each node to the destination.
-  GraphNodeMap<DistanceFromSource> min_delays_;
-
-  // Adjacency list.
-  const GraphNodeMap<std::vector<GraphLinkIndex>>* adj_list_;
-
-  // Graph storage.
-  const GraphStorage* graph_storage_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShortestPath);
-};
-
 // A set of constraints.
 class ConstraintSet {
  public:
@@ -99,19 +49,70 @@ class ConstraintSet {
     return node_sets_to_exclude_;
   };
 
-  const std::vector<const GraphNodeSet*>& visit_order() const {
-    return visit_order_;
-  }
-
  private:
   // Links/nodes that will be excluded from the graph.
   std::vector<const GraphLinkSet*> link_sets_to_exclude_;
   std::vector<const GraphNodeSet*> node_sets_to_exclude_;
-
-  // All paths will have to visit at least one node from each set. The sets
-  // should be visited in the order they appear here.
-  std::vector<const GraphNodeSet*> visit_order_;
 };
+
+// Single source shortest path tree from a source to a set of nodes.
+class ShortestPath {
+ public:
+  ShortestPath(GraphNodeIndex src, const GraphNodeSet& dst_nodes,
+               const ConstraintSet* constraints,
+               const GraphNodeMap<std::vector<GraphLinkIndex>>* adj_list,
+               const GraphStorage* graph_storage)
+      : src_(src),
+        destinations_(dst_nodes),
+        adj_list_(adj_list),
+        graph_storage_(graph_storage),
+        constraints_(constraints) {
+    ComputePaths();
+  }
+
+  // Returns the shortest path to the destination.
+  LinkSequence GetPath(GraphNodeIndex dst) const;
+
+  // Returns the distance from the source to a destination.
+  Delay GetPathDistance(GraphNodeIndex dst) const;
+
+ private:
+  struct DistanceFromSource {
+    DistanceFromSource() : distance(Delay::max()) {}
+    Delay distance;
+  };
+
+  void ComputePaths();
+
+  // The source.
+  GraphNodeIndex src_;
+
+  // For each node, the link that leads to it in the SP tree.
+  GraphNodeMap<GraphLinkIndex> previous_;
+
+  // Delays from the source to each destination node.
+  GraphNodeMap<DistanceFromSource> min_delays_;
+
+  // The destinations.
+  GraphNodeSet destinations_;
+
+  // Adjacency list.
+  const GraphNodeMap<std::vector<GraphLinkIndex>>* adj_list_;
+
+  // Graph storage.
+  const GraphStorage* graph_storage_;
+
+  // Constraints for the problem.
+  const ConstraintSet* constraints_;
+
+  DISALLOW_COPY_AND_ASSIGN(ShortestPath);
+};
+
+// Each node can belong to one of up to 64 groups. By assigning nodes to groups,
+// constraints can be later specified for paths with respect to groups (e.g,
+// paths should always cross a member of a group of nodes).
+struct NodeGroupTag {};
+using NodeGroup = TypesafeUintWrapper<NodeGroupTag, uint8_t>;
 
 // A directed graph.
 class DirectedGraph {

@@ -170,6 +170,8 @@ static Links RecoverPath(GraphNodeIndex src, GraphNodeIndex dst,
 }
 
 LinkSequence ShortestPath::GetPath(GraphNodeIndex dst) const {
+  CHECK(destinations_.Contains(dst)) << "Bad destination";
+
   Links links = RecoverPath(src_, dst, previous_, graph_storage_);
   if (links.empty()) {
     return {};
@@ -177,6 +179,19 @@ LinkSequence ShortestPath::GetPath(GraphNodeIndex dst) const {
 
   Delay distance = min_delays_[dst].distance;
   return {links, distance};
+}
+
+Delay ShortestPath::GetPathDistance(GraphNodeIndex dst) const {
+  CHECK(destinations_.Contains(dst)) << "Bad destination";
+
+  // This is the tree that starts at 'src_'. It may be possible that there are
+  // nodes in the graph that are not reachable from 'src_'. Those nodes will
+  // not have a distance set in 'min_delays_'.
+  if (!min_delays_.HasValue(dst)) {
+    return Delay::max();
+  }
+
+  return min_delays_.UnsafeAccess(dst).distance;
 }
 
 void ShortestPath::ComputePaths() {
@@ -187,30 +202,49 @@ void ShortestPath::ComputePaths() {
   min_delays_.Resize(graph_storage_->NodeCount());
   previous_.Resize(graph_storage_->NodeCount());
 
+  if (constraints_->CanExcludeNode(src_)) {
+    return;
+  }
+
   min_delays_.UnsafeAccess(src_).distance = Delay::zero();
   vertex_queue.emplace(Delay::zero(), src_);
 
+  size_t destinations_remaining = destinations_.Count();
   while (!vertex_queue.empty()) {
     Delay distance;
     GraphNodeIndex current;
     std::tie(distance, current) = vertex_queue.top();
     vertex_queue.pop();
 
-    if (!adj_list_->HasValue(current)) {
-      // A leaf.
+    if (distance > min_delays_.UnsafeAccess(current).distance) {
+      // Bogus leftover node, since we never delete nodes from the heap.
       continue;
     }
 
-    if (distance > min_delays_.UnsafeAccess(current).distance) {
-      // Bogus leftover node, since we never delete nodes from the heap.
+    if (destinations_.Contains(current)) {
+      --destinations_remaining;
+      if (destinations_remaining == 0) {
+        break;
+      }
+    }
+
+    if (!adj_list_->HasValue(current)) {
+      // A leaf.
       continue;
     }
 
     const std::vector<GraphLinkIndex>& neighbors =
         adj_list_->UnsafeAccess(current);
     for (GraphLinkIndex out_link : neighbors) {
+      if (constraints_->CanExcludeLink(out_link)) {
+        continue;
+      }
+
       const GraphLink* out_link_ptr = graph_storage_->GetLink(out_link);
       GraphNodeIndex neighbor_node = out_link_ptr->dst();
+      if (constraints_->CanExcludeNode(neighbor_node)) {
+        continue;
+      }
 
       const Delay link_delay = out_link_ptr->delay();
       const Delay distance_via_neighbor = distance + link_delay;
@@ -224,16 +258,24 @@ void ShortestPath::ComputePaths() {
       }
     }
   }
+
+  CHECK(destinations_remaining == 0)
+      << "Unable to find paths to all destinations";
 }
+
+LinkSequence ShortestPathWithConstraints(
+    GraphNodeIndex src, GraphNodeIndex dst,
+    const std::vector<GraphNodeSet>& to_visit,
+    const ConstraintSet& constraints) {}
 
 LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
                                     GraphNodeIndex dst) const {
-  using DelayAndIndex = std::pair<Delay, GraphNodeIndex>;
+  using FrontierNode = std::pair<Delay, GraphNodeIndex>;
   const GraphStorage* graph_storage = parent_->graph_storage();
   const auto& adjacency_list = parent_->AdjacencyList();
 
-  std::priority_queue<DelayAndIndex, std::vector<DelayAndIndex>,
-                      std::greater<DelayAndIndex>> frontier;
+  std::priority_queue<FrontierNode, std::vector<FrontierNode>,
+                      std::greater<FrontierNode>> frontier;
   GraphNodeMap<Delay> cost_so_far;
   cost_so_far.Resize(graph_storage->NodeCount());
   for (GraphNodeIndex node_index : graph_storage->AllNodes()) {
@@ -264,6 +306,11 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
       continue;
     }
 
+    //    if (distance > cost_so_far.UnsafeAccess(current)) {
+    //      // Bogus leftover node, since we never delete nodes from the heap.
+    //      continue;
+    //    }
+
     const std::vector<GraphLinkIndex>& neighbors =
         adjacency_list.UnsafeAccess(current);
     for (GraphLinkIndex out_link : neighbors) {
@@ -281,8 +328,7 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
       const Delay new_cost = cost_so_far[current] + link_delay;
       if (new_cost < cost_so_far[neighbor_node]) {
         cost_so_far[neighbor_node] = new_cost;
-        Delay priority =
-            new_cost + parent_->ShortestPathDelay(neighbor_node, dst);
+        Delay priority = new_cost;
         frontier.emplace(priority, neighbor_node);
         came_from[neighbor_node] = out_link;
       }

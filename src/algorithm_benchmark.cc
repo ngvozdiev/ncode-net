@@ -1,15 +1,12 @@
 #include <chrono>
+#include <ncode/ncode_common/substitute.h>
 
 #include "net.pb.h"
-#include "../common/common.h"
-#include "../common/file.h"
-#include "../common/logging.h"
-#include "../common/substitute.h"
 #include "algorithm.h"
 #include "net_common.h"
 #include "net_gen.h"
 
-using namespace ncode;
+using namespace nc;
 using namespace std::chrono;
 
 static void TimeMs(const std::string& msg, std::function<void()> f) {
@@ -33,94 +30,54 @@ int main(int argc, char** argv) {
   Unused(argc);
   Unused(argv);
 
-  net::PBNet net = net::GenerateSprint(
-      net::Bandwidth::FromBitsPerSecond(1000000), net::Delay::zero(), 2.0);
+  net::PBNet net = net::GenerateHE(net::Bandwidth::FromBitsPerSecond(1000000),
+                                   net::Delay::zero(), 2.0);
   net::GraphStorage path_storage(net);
-  net::DirectedGraph graph(&path_storage);
   LOG(ERROR) << "Graph with " << path_storage.NodeCount() << " nodes and "
              << path_storage.LinkCount() << " links";
 
-  net::DistanceClusteredGraph clustered_graph({}, milliseconds(2), &graph);
-  net::GraphStats stats = clustered_graph.clustered_storage()->Stats();
-  LOG(ERROR) << stats.multiple_links << " " << stats.unidirectional_links
-             << clustered_graph.clustered_storage()->AllNodes().Count() << " "
-             << clustered_graph.clustered_storage()->AllLinks().Count();
+  net::GraphNodeIndex london_node = path_storage.NodeFromStringOrDie("London");
+  net::GraphNodeIndex tokyo_node = path_storage.NodeFromStringOrDie("Tokyo");
 
-  TimeMs("All pair shortest path",
-         [&graph] { net::AllPairShortestPath all_pair_sp({}, &graph); });
+  TimeMs("1000 calls to DirectedGraph",
+         [&path_storage, &london_node, &tokyo_node] {
+           for (size_t i = 0; i < 1000; ++i) {
+             net::DirectedGraph graph(&path_storage);
+             graph.ShortestPath(london_node, tokyo_node);
+           }
+         });
 
-  net::GraphNodeIndex london_node =
-      path_storage.NodeFromStringOrDie("London4045");
-  net::GraphNodeIndex tokyo_node =
-      path_storage.NodeFromStringOrDie("Tokyo4070");
+  std::vector<net::LinkSequence> all_paths;
+  TimeMs("DFS for all paths",
+         [&path_storage, &london_node, &tokyo_node, &all_paths] {
+           net::DirectedGraph graph(&path_storage);
+           net::ConstraintSet constraints;
+           net::SubGraph sub_graph(&graph, &constraints);
 
-  TimeMs("1000 calls to shortest path", [&graph, &london_node, &tokyo_node] {
-    for (size_t i = 0; i < 1000; ++i) {
-      net::ShortestPath sp({}, london_node, &graph);
-      sp.GetPath(tokyo_node);
+           sub_graph.Paths(london_node, tokyo_node,
+                           [&all_paths](const net::LinkSequence& links) {
+                             all_paths.emplace_back(links);
+                           });
+         });
+  LOG(ERROR) << "Got " << all_paths.size() << " paths";
+  std::sort(all_paths.begin(), all_paths.end());
+
+  std::vector<net::LinkSequence> paths;
+  TimeMs("10000 calls to shortest path", [&path_storage, &london_node,
+                                          &tokyo_node, &paths] {
+    net::DirectedGraph graph(&path_storage);
+    net::ConstraintSet constraints;
+    net::SubGraph sub_graph(&graph, &constraints);
+    net::KShortestPathsGenerator ksp(london_node, tokyo_node, &sub_graph);
+
+    for (size_t i = 0; i < 10000; ++i) {
+      paths.emplace_back(ksp.KthShortestPath(i));
     }
   });
 
-  //  std::vector<net::LinkSequence> paths;
-  //  paths.reserve(10000000);
-  //  TimeMs("DFS, all paths between a pair of endpoints", [&graph,
-  //  &london_node,
-  //                                                        &tokyo_node, &paths]
-  //                                                        {
-  //    net::DFS dfs({}, &graph);
-  //    dfs.Paths(
-  //        london_node, tokyo_node, duration_cast<net::Delay>(seconds(1)), 20,
-  //        [&paths](const net::LinkSequence& path) { paths.emplace_back(path);
-  //        });
-  //  });
-  //  std::sort(paths.begin(), paths.end());
-
-  std::vector<net::LinkSequence> k_paths;
-  k_paths.reserve(1000);
-  TimeMs("1000 shortest paths", [&graph, &london_node, &tokyo_node, &k_paths] {
-    net::KShortestPaths ksp({}, {}, london_node, tokyo_node, &graph);
-    for (size_t i = 0; i < 1000; ++i) {
-      k_paths.emplace_back(ksp.NextPath());
-    }
-  });
-
-  //  for (size_t i = 0; i < 1000; ++i) {
-  //    CHECK(k_paths[i] == paths[i]) << i << "th shortest path differs";
-  //  }
-
-  std::string out;
-  size_t id = 0;
-  for (net::GraphNodeIndex src : path_storage.AllNodes()) {
-    for (net::GraphNodeIndex dst : path_storage.AllNodes()) {
-      if (src == dst) {
-        continue;
-      }
-
-      for (size_t i = 0; i < 10; ++i) {
-        size_t count = 100 * i;
-        std::string message = Substitute("$0 shortest paths", count);
-        TimeToString(&out, id, count, [&graph, &src, &dst, count] {
-          net::KShortestPaths ksp({}, {}, src, dst, &graph);
-          for (size_t j = 0; j < count; ++j) {
-            ksp.NextPath();
-          }
-        });
-      }
-
-      LOG(ERROR) << "I " << id;
-
-      ++id;
-
-      if (id == 100) {
-        break;
-      }
-    }
-
-    if (id == 100) {
-      break;
-    }
-    LOG(ERROR) << "Done " << src;
+  for (size_t i = 0; i < 10000; ++i) {
+    CHECK(all_paths[i] == paths[i]);
   }
 
-  File::WriteStringToFile(out, "benchmark_output");
+  LOG(ERROR) << "KSP " << paths.size();
 }
