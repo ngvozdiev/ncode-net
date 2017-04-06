@@ -43,7 +43,6 @@ int main(int argc, char** argv) {
          [&path_storage, &london_node, &tokyo_node] {
            for (size_t i = 0; i < 1000; ++i) {
              net::DirectedGraph graph(&path_storage);
-             graph.ShortestPath(london_node, tokyo_node);
            }
          });
 

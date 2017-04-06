@@ -172,6 +172,63 @@ TEST_F(FourEdges, ShortestPath) {
   ASSERT_EQ(P("[]"), sub_graph.ShortestPath(N("C"), N("A")));
 }
 
+TEST_F(FourEdges, ShortestPathVisitConstraint) {
+  DirectedGraph graph(&storage_);
+
+  GraphNodeSet to_visit = {N("B")};
+  ConstraintSet constraints;
+  constraints.AddToVisitSet(&to_visit);
+
+  SubGraph sub_graph(&graph, &constraints);
+//  ASSERT_EQ(P("[A->B, B->C, C->D]"), sub_graph.ShortestPath(N("A"), N("D")));
+  ASSERT_EQ(P("[B->C]"), sub_graph.ShortestPath(N("B"), N("C")));
+//  ASSERT_EQ(P("[]"), sub_graph.ShortestPath(N("C"), N("A")));
+//  ASSERT_EQ(P("[A->B, B->C]"), sub_graph.ShortestPath(N("A"), N("C")));
+}
+
+TEST_F(FourEdges, ShortestPathVisitConstraintTwoNodes) {
+  DirectedGraph graph(&storage_);
+
+  GraphNodeSet to_visit = {N("B"), N("C")};
+  ConstraintSet constraints;
+  constraints.AddToVisitSet(&to_visit);
+
+  SubGraph sub_graph(&graph, &constraints);
+  ASSERT_EQ(P("[A->B, B->C, C->D]"), sub_graph.ShortestPath(N("A"), N("D")));
+  ASSERT_EQ(P("[B->C]"), sub_graph.ShortestPath(N("B"), N("C")));
+  ASSERT_EQ(P("[]"), sub_graph.ShortestPath(N("C"), N("A")));
+  ASSERT_EQ(P("[A->B, B->C]"), sub_graph.ShortestPath(N("A"), N("C")));
+}
+
+TEST_F(FourEdges, ShortestPathVisitConstraintFull) {
+  DirectedGraph graph(&storage_);
+
+  // Any path through the graph is valid.
+  GraphNodeSet to_visit = {N("A"), N("B"), N("C"), N("D")};
+  ConstraintSet constraints;
+  constraints.AddToVisitSet(&to_visit);
+
+  SubGraph sub_graph(&graph, &constraints);
+  ASSERT_EQ(P("[A->D]"), sub_graph.ShortestPath(N("A"), N("D")));
+  ASSERT_EQ(P("[B->C]"), sub_graph.ShortestPath(N("B"), N("C")));
+  ASSERT_EQ(P("[A->B, B->C]"), sub_graph.ShortestPath(N("A"), N("C")));
+  ASSERT_EQ(P("[]"), sub_graph.ShortestPath(N("C"), N("A")));
+}
+
+TEST_F(FourEdges, ShortestPathVisitConstraintTwoSets) {
+  DirectedGraph graph(&storage_);
+
+  GraphNodeSet to_visit_one = {N("A"), N("D")};
+  GraphNodeSet to_visit_two = {N("B"), N("C")};
+
+  ConstraintSet constraints;
+  constraints.AddToVisitSet(&to_visit_one);
+  constraints.AddToVisitSet(&to_visit_two);
+
+  SubGraph sub_graph(&graph, &constraints);
+  ASSERT_EQ(P("[]"), sub_graph.ShortestPath(N("A"), N("D")));
+}
+
 TEST_F(FourEdges, SubGraph) {
   DirectedGraph graph(&storage_);
 

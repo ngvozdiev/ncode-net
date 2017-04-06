@@ -41,6 +41,8 @@ class ConstraintSet {
     return false;
   }
 
+  void AddToVisitSet(const GraphNodeSet* set) { to_visit_.emplace_back(set); }
+
   const std::vector<const GraphLinkSet*>& link_sets_to_exclude() const {
     return link_sets_to_exclude_;
   };

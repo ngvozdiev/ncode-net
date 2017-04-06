@@ -196,7 +196,7 @@ void ShortestPath::ComputePaths() {
       continue;
     }
 
-    LOG(ERROR) << "CC " << current;
+    //    LOG(ERROR) << "CC " << current;
 
     if (destinations_.Contains(current)) {
       --destinations_remaining;
@@ -208,16 +208,17 @@ void ShortestPath::ComputePaths() {
     const std::vector<AdjacencyList::LinkInfo>& neighbors =
         adj_list_->GetNeighbors(current);
     for (const AdjacencyList::LinkInfo& out_link_info : neighbors) {
-      LOG(ERROR) << "N of " << current << " -> " << out_link_info.dst_index;
+      //      LOG(ERROR) << "N of " << current << " -> " <<
+      //      out_link_info.dst_index;
       GraphLinkIndex out_link = out_link_info.link_index;
       if (constraints_->CanExcludeLink(out_link)) {
-        LOG(ERROR) << "AAA";
+        //        LOG(ERROR) << "AAA";
         continue;
       }
 
       GraphNodeIndex neighbor_node = out_link_info.dst_index;
       if (constraints_->CanExcludeNode(neighbor_node)) {
-        LOG(ERROR) << "BBB";
+        //        LOG(ERROR) << "BBB";
         continue;
       }
 
@@ -237,6 +238,12 @@ void ShortestPath::ComputePaths() {
 
 LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
                                     GraphNodeIndex dst) const {
+  const std::vector<const GraphNodeSet*>& to_visit = constraints_->to_visit();
+  if (to_visit.empty()) {
+    net::ShortestPath sp(src, {dst}, constraints_, &parent_->AdjacencyList());
+    return sp.GetPath(dst);
+  }
+
   // Stores SP trees. It will contain an SP tree rooted at the source, as well
   // as every node in every set to visit. The paths in the tree will become
   // edges in a new graph, the shortest path in which will be the end-to-end
@@ -260,14 +267,13 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
   // path_graph_link_index_gen.
   std::map<GraphLinkIndex, std::pair<GraphNodeIndex, GraphNodeIndex>> link_map;
 
-  const std::vector<const GraphNodeSet*>& to_visit = constraints_->to_visit();
   LOG(ERROR) << "I " << src << " " << dst;
-  for (size_t i = -1; i != to_visit.size(); ++i) {
+  for (size_t i = 0; i < to_visit.size(); ++i) {
     LOG(ERROR) << "I " << i;
 
     // For each set we will compute the SP trees rooted at each node. Each of
     // those SP trees should avoid nodes from other sets, except for the next
-    // set, and be for destinations in the next set.
+    // set.
     to_exclude.Clear();
     for (size_t j = 0; j < to_visit.size(); ++j) {
       if (i != j && (i + 1) != j) {
@@ -283,12 +289,14 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
     }
 
     GraphNodeSet sources;
-    if (i == static_cast<size_t>(-1)) {
+    if (i == 0) {
       sources.Insert(src);
-    } else {
-      const GraphNodeSet& set_to_visit = *to_visit[i];
-      sources.InsertAll(set_to_visit);
     }
+    const GraphNodeSet& set_to_visit = *to_visit[i];
+    sources.InsertAll(set_to_visit);
+
+    CHECK(!sources.Empty());
+    CHECK(!destinations.Empty());
 
     std::string out;
     for (GraphNodeIndex n : destinations) {
@@ -308,21 +316,32 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
     }
     LOG(ERROR) << "TE " << out;
 
+    bool no_path_found = true;
     for (GraphNodeIndex node_to_visit : sources) {
-      LOG(ERROR) << "Will run SP";
+      LOG(ERROR) << "Will run SP rooted at " << node_to_visit;
       auto sp_tree = make_unique<net::ShortestPath>(node_to_visit, destinations,
                                                     &constraint_set_cpy,
                                                     &parent_->AdjacencyList());
       for (GraphNodeIndex destination : destinations) {
         GraphLinkIndex new_link_index(++path_graph_link_index_gen);
         Delay sp_delay = sp_tree->GetPathDistance(destination);
+        if (sp_delay == Delay::max()) {
+          LOG(ERROR) << "No path found";
+          continue;
+        }
+
         path_graph_adj_list.AddLink(new_link_index, node_to_visit, destination,
                                     sp_delay);
         link_map[new_link_index] = {node_to_visit, destination};
         LOG(ERROR) << "SP " << node_to_visit << " -> " << destination << " li "
                    << new_link_index << " delay " << sp_delay.count();
+        no_path_found = false;
       }
       paths[node_to_visit] = std::move(sp_tree);
+    }
+
+    if (no_path_found) {
+      return {};
     }
   }
 
@@ -338,6 +357,7 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
   for (GraphLinkIndex path_graph_link : sp.links()) {
     GraphNodeIndex sub_path_from;
     GraphNodeIndex sub_path_to;
+    LOG(ERROR) << "Subpath from " << sub_path_from << " to " << sub_path_to;
 
     std::tie(sub_path_from, sub_path_to) = link_map[path_graph_link];
     LinkSequence sub_path = paths[sub_path_from]->GetPath(sub_path_to);
