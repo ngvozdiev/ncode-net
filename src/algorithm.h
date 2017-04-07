@@ -6,6 +6,7 @@
 #include <queue>
 
 #include "net_common.h"
+#include "trie.h"
 
 namespace nc {
 namespace net {
@@ -220,6 +221,31 @@ class SubGraph {
   const ConstraintSet* constraints_;
 };
 
+struct KShortestPathGeneratorStats {
+  // Number of shortest paths kept in memory.
+  size_t k = 0;
+
+  // The number of bytes occupied by the K paths.
+  size_t paths_size_bytes = 0;
+
+  // Stats of the trie that lets the KSP algorithm do quick path prefix lookups.
+  TrieStats trie_stats;
+
+  // Number of candidate paths.
+  size_t candidate_count = 0;
+
+  // Total memory occupied by this KSP generator, includes the list of k paths,
+  // the candidates, and the trie.
+  size_t total_size_bytes = 0;
+
+  std::string ToString() {
+    return Substitute(
+        "k: $0 ($1 bytes), trie: $2, candidates: $3, total: $4 bytes", k,
+        paths_size_bytes, trie_stats.ToString(), candidate_count,
+        total_size_bytes);
+  }
+};
+
 // Generates shortest paths in increasing order.
 class KShortestPathsGenerator {
  public:
@@ -230,8 +256,32 @@ class KShortestPathsGenerator {
   // Returns the Kth shortest path.
   LinkSequence KthShortestPath(size_t k);
 
+  KShortestPathGeneratorStats GetStats() const {
+    KShortestPathGeneratorStats stats;
+    stats.k = k_paths_.size();
+    stats.paths_size_bytes = PathContainerSize(k_paths_);
+
+    stats.trie_stats = k_paths_trie_.GetStats();
+    stats.candidate_count = candidates_.size();
+
+    size_t candidate_overhead = PathContainerSize(candidates_.containter());
+    stats.total_size_bytes = sizeof(*this) + stats.paths_size_bytes +
+                             stats.trie_stats.size_bytes + candidate_overhead;
+    return stats;
+  }
+
  private:
   using PathAndStartIndex = std::pair<LinkSequence, size_t>;
+
+  static size_t PathContainerSize(
+      const std::vector<PathAndStartIndex>& container) {
+    size_t total = container.capacity() * sizeof(PathAndStartIndex);
+    for (const auto& path : container) {
+      total += path.first.InMemBytesEstimate() - sizeof(LinkSequence);
+    }
+
+    return total;
+  }
 
   // Adds the next shortest paths to the K shortest paths list. Returns true if
   // no more shortest paths exist.
@@ -244,9 +294,12 @@ class KShortestPathsGenerator {
   // Stores the K shortest paths in order.
   std::vector<PathAndStartIndex> k_paths_;
 
+  // The K shortest paths, in a trie for quick prefix lookup.
+  Trie<GraphLinkIndex, uint32_t> k_paths_trie_;
+
   // Stores candidates for K shortest paths.
-  std::priority_queue<PathAndStartIndex, std::vector<PathAndStartIndex>,
-                      std::greater<PathAndStartIndex>> candidates_;
+  VectorPriorityQueue<PathAndStartIndex, std::greater<PathAndStartIndex>>
+      candidates_;
 
   // The source.
   GraphNodeIndex src_;

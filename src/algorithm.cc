@@ -181,7 +181,7 @@ void ShortestPath::ComputePaths() {
     return;
   }
 
-  min_delays_.UnsafeAccess(src_).distance = Delay::zero();
+  min_delays_[src_].distance = Delay::zero();
   vertex_queue.emplace(Delay::zero(), src_);
 
   size_t destinations_remaining = destinations_.Count();
@@ -191,7 +191,7 @@ void ShortestPath::ComputePaths() {
     std::tie(distance, current) = vertex_queue.top();
     vertex_queue.pop();
 
-    if (distance > min_delays_.UnsafeAccess(current).distance) {
+    if (distance > min_delays_[current].distance) {
       // Bogus leftover node, since we never delete nodes from the heap.
       continue;
     }
@@ -224,12 +224,11 @@ void ShortestPath::ComputePaths() {
 
       const Delay link_delay = out_link_info.delay;
       const Delay distance_via_neighbor = distance + link_delay;
-      Delay& curr_min_distance =
-          min_delays_.UnsafeAccess(neighbor_node).distance;
+      Delay& curr_min_distance = min_delays_[neighbor_node].distance;
 
       if (distance_via_neighbor < curr_min_distance) {
         curr_min_distance = distance_via_neighbor;
-        previous_.UnsafeAccess(neighbor_node) = &out_link_info;
+        previous_[neighbor_node] = &out_link_info;
         vertex_queue.emplace(curr_min_distance, neighbor_node);
       }
     }
@@ -267,9 +266,15 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
   // path_graph_link_index_gen.
   std::map<GraphLinkIndex, std::pair<GraphNodeIndex, GraphNodeIndex>> link_map;
 
-  LOG(ERROR) << "I " << src << " " << dst;
-  for (size_t i = 0; i < to_visit.size(); ++i) {
-    LOG(ERROR) << "I " << i;
+  // Need to act differently depending on whether the first set to visit
+  // contains the source or not. If it does not will act as if there is an extra
+  // set that only contains the source.
+  bool first_set_contains_src = to_visit.front()->Contains(src);
+  size_t start_from = first_set_contains_src ? 0 : -1;
+
+  //  LOG(ERROR) << "I " << src << " " << dst << " " << start_from;
+  for (size_t i = start_from; i != to_visit.size(); ++i) {
+    //    LOG(ERROR) << "I " << i;
 
     // For each set we will compute the SP trees rooted at each node. Each of
     // those SP trees should avoid nodes from other sets, except for the next
@@ -289,36 +294,37 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
     }
 
     GraphNodeSet sources;
-    if (i == 0) {
+    if (i == static_cast<size_t>(-1)) {
       sources.Insert(src);
+    } else {
+      const GraphNodeSet& set_to_visit = *to_visit[i];
+      sources.InsertAll(set_to_visit);
     }
-    const GraphNodeSet& set_to_visit = *to_visit[i];
-    sources.InsertAll(set_to_visit);
+    //
+    //    std::string out;
+    //    for (GraphNodeIndex n : destinations) {
+    //      out += " " + std::to_string(n);
+    //    }
+    //    LOG(ERROR) << "D " << out;
+    //
+    //    out = "";
+    //    for (GraphNodeIndex n : sources) {
+    //      out += " " + std::to_string(n);
+    //    }
+    //    LOG(ERROR) << "S " << out;
+    //
+    //    out = "";
+    //    for (GraphNodeIndex n : to_exclude) {
+    //      out += " " + std::to_string(n);
+    //    }
+    //    LOG(ERROR) << "TE " << out;
 
     CHECK(!sources.Empty());
     CHECK(!destinations.Empty());
 
-    std::string out;
-    for (GraphNodeIndex n : destinations) {
-      out += " " + std::to_string(n);
-    }
-    LOG(ERROR) << "D " << out;
-
-    out = "";
-    for (GraphNodeIndex n : sources) {
-      out += " " + std::to_string(n);
-    }
-    LOG(ERROR) << "S " << out;
-
-    out = "";
-    for (GraphNodeIndex n : to_exclude) {
-      out += " " + std::to_string(n);
-    }
-    LOG(ERROR) << "TE " << out;
-
     bool no_path_found = true;
     for (GraphNodeIndex node_to_visit : sources) {
-      LOG(ERROR) << "Will run SP rooted at " << node_to_visit;
+      //      LOG(ERROR) << "Will run SP rooted at " << node_to_visit;
       auto sp_tree = make_unique<net::ShortestPath>(node_to_visit, destinations,
                                                     &constraint_set_cpy,
                                                     &parent_->AdjacencyList());
@@ -326,15 +332,16 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
         GraphLinkIndex new_link_index(++path_graph_link_index_gen);
         Delay sp_delay = sp_tree->GetPathDistance(destination);
         if (sp_delay == Delay::max()) {
-          LOG(ERROR) << "No path found";
+          //          LOG(ERROR) << "No path found";
           continue;
         }
 
         path_graph_adj_list.AddLink(new_link_index, node_to_visit, destination,
                                     sp_delay);
         link_map[new_link_index] = {node_to_visit, destination};
-        LOG(ERROR) << "SP " << node_to_visit << " -> " << destination << " li "
-                   << new_link_index << " delay " << sp_delay.count();
+        //        LOG(ERROR) << "SP " << node_to_visit << " -> " << destination
+        //        << " li "
+        //                   << new_link_index << " delay " << sp_delay.count();
         no_path_found = false;
       }
       paths[node_to_visit] = std::move(sp_tree);
@@ -357,7 +364,8 @@ LinkSequence SubGraph::ShortestPath(GraphNodeIndex src,
   for (GraphLinkIndex path_graph_link : sp.links()) {
     GraphNodeIndex sub_path_from;
     GraphNodeIndex sub_path_to;
-    LOG(ERROR) << "Subpath from " << sub_path_from << " to " << sub_path_to;
+    //    LOG(ERROR) << "Subpath from " << sub_path_from << " to " <<
+    //    sub_path_to;
 
     std::tie(sub_path_from, sub_path_to) = link_map[path_graph_link];
     LinkSequence sub_path = paths[sub_path_from]->GetPath(sub_path_to);
@@ -375,6 +383,7 @@ bool KShortestPathsGenerator::NextPath() {
 
   if (k_paths_.empty()) {
     LinkSequence path = sub_graph_->ShortestPath(src_, dst_);
+    k_paths_trie_.Add(path.links(), 0);
     k_paths_.emplace_back(path, 0);
     return true;
   }
@@ -426,7 +435,9 @@ bool KShortestPathsGenerator::NextPath() {
 
   PathAndStartIndex min_candidate = candidates_.top();
   candidates_.pop();
+  k_paths_trie_.Add(min_candidate.first.links(), k_paths_.size());
   k_paths_.emplace_back(min_candidate);
+
   return true;
 }
 
@@ -445,31 +456,23 @@ LinkSequence KShortestPathsGenerator::KthShortestPath(size_t k) {
   return k_paths_.back().first;
 }
 
-// Returns true if prefix_path[0:index] == path[0:index]
-static bool HasPrefix(const Links& path, const Links& prefix) {
-  CHECK(prefix.size() <= path.size()) << prefix.size() << " vs " << path.size();
-  for (size_t i = 0; i < prefix.size(); ++i) {
-    if (path[i] != prefix[i]) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 void KShortestPathsGenerator::GetLinkExclusionSet(const Links& root_path,
                                                   GraphLinkSet* out) {
-  for (const PathAndStartIndex& k_path_and_index : k_paths_) {
-    const LinkSequence& k_path = k_path_and_index.first;
-    if (k_path.size() < root_path.size()) {
-      continue;
+  if (root_path.empty()) {
+    for (const auto& path : k_paths_) {
+      const Links& k_path_links = path.first.links();
+      out->Insert(k_path_links[0]);
     }
 
-    const Links& k_path_links = k_path.links();
-    if (HasPrefix(k_path_links, root_path)) {
-      CHECK(k_path_links.size() > root_path.size());
-      out->Insert(k_path_links[root_path.size()]);
-    }
+    return;
+  }
+
+  const std::vector<uint32_t>& paths_with_same_prefix =
+      k_paths_trie_.SequencesWithPrefix(root_path);
+  for (uint32_t k : paths_with_same_prefix) {
+    const Links& k_path_links = k_paths_[k].first.links();
+    CHECK(k_path_links.size() > root_path.size());
+    out->Insert(k_path_links[root_path.size()]);
   }
 }
 

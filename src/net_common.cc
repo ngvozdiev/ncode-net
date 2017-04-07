@@ -414,7 +414,7 @@ GraphNodeIndex LinkSequence::LastHop(const GraphStorage* storage) const {
 }
 
 size_t LinkSequence::InMemBytesEstimate() const {
-  return 2 * links_.capacity() * sizeof(Links::value_type) + sizeof(*this);
+  return links_.capacity() * sizeof(Links::value_type) + sizeof(*this);
 }
 
 Delay LinkSequence::delay() const { return delay_; }
