@@ -97,8 +97,13 @@ int main(int argc, char** argv) {
     LOG(ERROR) << ksp.GetStats().ToString();
   });
 
-  for (size_t i = 0; i < 1000; ++i) {
+  for (size_t i = 0; i < 50000; ++i) {
+    if (all_paths[i] != paths[i]) {
+      LOG(ERROR) << all_paths[i].ToStringNoPorts(&path_storage) << " vs "
+                 << paths[i].ToStringNoPorts(&path_storage) << " " << i;
+    }
     CHECK(all_paths[i] == paths[i]);
+    //    LOG(ERROR) << all_paths[i].ToStringNoPorts(&path_storage);
   }
 
   LOG(ERROR) << "KSP " << paths.size();

@@ -18,9 +18,13 @@ class ConstraintSet {
     link_sets_to_exclude_.emplace_back(set);
   }
 
+  void PopExcludeLinks() { link_sets_to_exclude_.pop_back(); }
+
   void AddToExcludeNodes(const GraphNodeSet* set) {
     node_sets_to_exclude_.emplace_back(set);
   }
+
+  void PopExcludeNodes() { node_sets_to_exclude_.pop_back(); }
 
   bool CanExcludeLink(const GraphLinkIndex link) const {
     for (const GraphLinkSet* set : link_sets_to_exclude_) {
@@ -63,6 +67,11 @@ class ConstraintSet {
   std::vector<const GraphNodeSet*> to_visit_;
 };
 
+// A disjunction constraint combines a number of ConstraintSets with ORs.
+class DisjunctionConstraint {
+
+};
+
 // Maintains connectivity information about a graph, and allows for quick
 // retrieval of link information (without going to a GraphStorage etc.).
 class AdjacencyList {
@@ -77,8 +86,8 @@ class AdjacencyList {
   void AddLink(GraphLinkIndex link_index, GraphNodeIndex src,
                GraphNodeIndex dst, Delay delay) {
     adj_[src].push_back({link_index, src, dst, delay});
-    max_index_ = std::max(src, max_index_);
-    max_index_ = std::max(dst, max_index_);
+    all_nodes_.Insert(src);
+    all_nodes_.Insert(dst);
   }
 
   // The neighbors of a node. Empty if the node is a leaf.
@@ -90,30 +99,33 @@ class AdjacencyList {
     return adj_.GetValueOrDie(node);
   }
 
-  // Max node index.
-  GraphNodeIndex MaxNodeIndex() const { return max_index_; }
+  const GraphNodeSet& AllNodes() const { return all_nodes_; }
+
+  const GraphNodeMap<std::vector<LinkInfo>>& Adjacencies() const {
+    return adj_;
+  }
 
  private:
-  // Max node index.
-  GraphNodeIndex max_index_;
-
   // An empty vector that GetNeighbors can return a reference to;
   std::vector<LinkInfo> empty_;
 
   // For each node its neighbors.
   GraphNodeMap<std::vector<LinkInfo>> adj_;
+
+  // All nodes/links.
+  GraphNodeSet all_nodes_;
 };
 
 // Single source shortest path tree from a source to a set of nodes.
 class ShortestPath {
  public:
   ShortestPath(GraphNodeIndex src, const GraphNodeSet& dst_nodes,
-               const ConstraintSet* constraints, const AdjacencyList* adj_list)
-      : src_(src),
-        destinations_(dst_nodes),
-        adj_list_(adj_list),
-        constraints_(constraints) {
-    ComputePaths();
+               const ConstraintSet& constraints, const AdjacencyList& adj_list,
+               const GraphNodeSet* additional_nodes_to_avoid,
+               const GraphLinkSet* additional_links_to_avoid)
+      : src_(src), destinations_(dst_nodes) {
+    ComputePaths(constraints, adj_list, additional_nodes_to_avoid,
+                 additional_links_to_avoid);
   }
 
   // Returns the shortest path to the destination.
@@ -122,13 +134,39 @@ class ShortestPath {
   // Returns the distance from the source to a destination.
   Delay GetPathDistance(GraphNodeIndex dst) const;
 
+  // Returns the nodes and  the links that are part of this tree.
+  std::pair<GraphNodeSet, GraphLinkSet> ElementsInTree() const;
+
+  friend bool operator<(const ShortestPath& a, const ShortestPath& b) {
+    return std::tie(a.src_, a.previous_, a.min_delays_, a.destinations_) <
+           std::tie(b.src_, b.previous_, b.min_delays_, b.destinations_);
+  }
+
+  friend bool operator==(const ShortestPath& a, const ShortestPath& b) {
+    return std::tie(a.src_, a.previous_, a.min_delays_, a.destinations_) ==
+           std::tie(b.src_, b.previous_, b.min_delays_, b.destinations_);
+  }
+
  private:
   struct DistanceFromSource {
     DistanceFromSource() : distance(Delay::max()) {}
     Delay distance;
+
+    friend bool operator<(const DistanceFromSource& a,
+                          const DistanceFromSource& b) {
+      return a.distance < b.distance;
+    }
+
+    friend bool operator==(const DistanceFromSource& a,
+                           const DistanceFromSource& b) {
+      return a.distance == b.distance;
+    }
   };
 
-  void ComputePaths();
+  void ComputePaths(const ConstraintSet& constraints,
+                    const AdjacencyList& adj_list,
+                    const GraphNodeSet* additional_nodes_to_avoid,
+                    const GraphLinkSet* additional_links_to_avoid);
 
   // The source.
   GraphNodeIndex src_;
@@ -141,14 +179,46 @@ class ShortestPath {
 
   // The destinations.
   GraphNodeSet destinations_;
+};
 
-  // Adjacency list.
-  const AdjacencyList* adj_list_;
+// Computes shortest paths between all pairs of nodes, can also be used to
+// figure out if the graph is partitioned.
+class AllPairShortestPath {
+ public:
+  AllPairShortestPath(const ConstraintSet& constraints,
+                      const AdjacencyList& adj_list,
+                      const GraphNodeSet* additional_nodes_to_avoid,
+                      const GraphLinkSet* additional_links_to_avoid) {
+    ComputePaths(constraints, adj_list, additional_nodes_to_avoid,
+                 additional_links_to_avoid);
+  }
 
-  // Constraints for the problem.
-  const ConstraintSet* constraints_;
+  // Returns the shortest path between src and dst.
+  LinkSequence GetPath(GraphNodeIndex src, GraphNodeIndex dst) const;
 
-  DISALLOW_COPY_AND_ASSIGN(ShortestPath);
+  // Returns the length of the shortest path between src and dst.
+  Delay GetDistance(GraphNodeIndex src, GraphNodeIndex dst) const;
+
+ private:
+  struct SPData {
+    SPData() : distance(Delay::max()) {}
+
+    // Distance between the 2 endpoints.
+    Delay distance;
+
+    // Successor in the SP.
+    GraphLinkIndex next_link;
+    GraphNodeIndex next_node;
+  };
+
+  // Populates data_.
+  void ComputePaths(const ConstraintSet& constraints,
+                    const AdjacencyList& adj_list,
+                    const GraphNodeSet* additional_nodes_to_avoid,
+                    const GraphLinkSet* additional_links_to_avoid);
+
+  // Distances to the destination.
+  GraphNodeMap<GraphNodeMap<SPData>> data_;
 };
 
 // Each node can belong to one of up to 64 groups. By assigning nodes to groups,
@@ -190,9 +260,6 @@ class SubGraph {
   SubGraph(const DirectedGraph* parent, const ConstraintSet* constraints)
       : parent_(parent), constraints_(constraints) {}
 
-  // Shortest path between two nodes.
-  LinkSequence ShortestPath(GraphNodeIndex from, GraphNodeIndex to) const;
-
   // Calls a callback with all paths between a source and a destination.
   void Paths(GraphNodeIndex src, GraphNodeIndex dst, PathCallback path_callback,
              Delay max_distance = Delay::max(),
@@ -201,9 +268,12 @@ class SubGraph {
   // The set of nodes that are reachable from a given node.
   GraphNodeSet ReachableNodes(GraphNodeIndex src) const;
 
+  // The shortest path between two nodes.
+  LinkSequence ShortestPath(GraphNodeIndex src, GraphNodeIndex dst) const;
+
   const DirectedGraph* parent() const { return parent_; }
 
-  const ConstraintSet* exclusion_set() const { return constraints_; }
+  const ConstraintSet* constraints() const { return constraints_; }
 
  private:
   void PathsRecursive(Delay max_distance, size_t max_hops, GraphNodeIndex at,
@@ -250,7 +320,7 @@ struct KShortestPathGeneratorStats {
 class KShortestPathsGenerator {
  public:
   KShortestPathsGenerator(GraphNodeIndex src, GraphNodeIndex dst,
-                          const SubGraph* sub_graph)
+                          SubGraph* sub_graph)
       : src_(src), dst_(dst), sub_graph_(sub_graph) {}
 
   // Returns the Kth shortest path.
@@ -267,6 +337,7 @@ class KShortestPathsGenerator {
     size_t candidate_overhead = PathContainerSize(candidates_.containter());
     stats.total_size_bytes = sizeof(*this) + stats.paths_size_bytes +
                              stats.trie_stats.size_bytes + candidate_overhead;
+
     return stats;
   }
 
@@ -282,6 +353,11 @@ class KShortestPathsGenerator {
 
     return total;
   }
+
+  // Shortest path between two nodes.
+  LinkSequence ShortestPath(GraphNodeIndex src, GraphNodeIndex dst,
+                            const GraphNodeSet& nodes_to_avoid,
+                            const GraphLinkSet& links_to_avoid);
 
   // Adds the next shortest paths to the K shortest paths list. Returns true if
   // no more shortest paths exist.

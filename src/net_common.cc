@@ -397,7 +397,8 @@ std::string LinkSequence::ToStringNoPorts(const GraphStorage* storage) const {
 
   const GraphLink* link = storage->GetLink(links_.back());
   ss << link->dst_node()->id();
-  ss << "]";
+  ss << "] ";
+  ss << StrCat(delay_.count(), "μs");
   return ss.str();
 }
 
