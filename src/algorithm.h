@@ -11,65 +11,66 @@
 namespace nc {
 namespace net {
 
-// A set of constraints.
-class ConstraintSet {
+// Nodes/links that should be excluded.
+class ExclusionSet {
  public:
-  void AddToExcludeLinks(const GraphLinkSet* set) {
-    link_sets_to_exclude_.emplace_back(set);
-  }
+  // Adds a new set of links to be excluded.
+  void Links(const GraphLinkSet& set) { links_to_exclude_.InsertAll(set); }
 
-  void PopExcludeLinks() { link_sets_to_exclude_.pop_back(); }
+  // Adds a new set of nodes to be excluded.
+  void Nodes(const GraphNodeSet& set) { nodes_to_exclude_.InsertAll(set); }
 
-  void AddToExcludeNodes(const GraphNodeSet* set) {
-    node_sets_to_exclude_.emplace_back(set);
-  }
+  // Returns true if the link should be excluded.
+  bool ShouldExcludeLink(const GraphLinkIndex link) const;
 
-  void PopExcludeNodes() { node_sets_to_exclude_.pop_back(); }
-
-  bool CanExcludeLink(const GraphLinkIndex link) const {
-    for (const GraphLinkSet* set : link_sets_to_exclude_) {
-      if (set->Contains(link)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  bool CanExcludeNode(const GraphNodeIndex node) const {
-    for (const GraphNodeSet* set : node_sets_to_exclude_) {
-      if (set->Contains(node)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  void AddToVisitSet(const GraphNodeSet* set) { to_visit_.emplace_back(set); }
-
-  const std::vector<const GraphLinkSet*>& link_sets_to_exclude() const {
-    return link_sets_to_exclude_;
-  };
-
-  const std::vector<const GraphNodeSet*>& node_sets_to_exclude() const {
-    return node_sets_to_exclude_;
-  };
-
-  const std::vector<const GraphNodeSet*>& to_visit() const { return to_visit_; }
+  // Returns true if the node should be excluded.
+  bool ShouldExcludeNode(const GraphNodeIndex node) const;
 
  private:
   // Links/nodes that will be excluded from the graph.
-  std::vector<const GraphLinkSet*> link_sets_to_exclude_;
-  std::vector<const GraphNodeSet*> node_sets_to_exclude_;
-
-  // Sets of nodes to visit, in the order given.
-  std::vector<const GraphNodeSet*> to_visit_;
+  GraphLinkSet links_to_exclude_;
+  GraphNodeSet nodes_to_exclude_;
 };
 
-// A disjunction constraint combines a number of ConstraintSets with ORs.
-class DisjunctionConstraint {
+// A set of constraints.
+class ConstraintSet {
+ public:
+  ConstraintSet() {}
 
+  // The exclusion set.
+  ExclusionSet& Exclude() { return exclusion_set_; }
+
+  const ExclusionSet& exclusion_set() const { return exclusion_set_; }
+
+  // Adds a new set of nodes to be visited.
+  void AddToVisitSet(const GraphNodeSet& set);
+
+  // Returns true if a sequence of links visits nodes in a compliant order.
+  bool OrderOk(const Links& links, const GraphStorage* graph_storage) const;
+
+  bool ShouldExcludeLink(const GraphLinkIndex link) const {
+    return exclusion_set_.ShouldExcludeLink(link);
+  }
+
+  bool ShouldExcludeNode(const GraphNodeIndex node) const {
+    return exclusion_set_.ShouldExcludeNode(node);
+  }
+
+  // Sets of nodes to visit, in the order given.
+  const std::vector<GraphNodeSet>& to_visit() const { return to_visit_; }
+
+ private:
+  // Links/nodes that will be excluded from the graph.
+  ExclusionSet exclusion_set_;
+
+  // Sets of nodes to visit.
+  std::vector<GraphNodeSet> to_visit_;
+
+  // Maps from a node index to the index of the node's set in to_visit_.
+  // Building this map also helps figure out if each node is in at most one set.
+  GraphNodeMap<size_t> node_to_visit_index_;
+
+  DISALLOW_COPY_AND_ASSIGN(ConstraintSet);
 };
 
 // Maintains connectivity information about a graph, and allows for quick
@@ -88,6 +89,11 @@ class AdjacencyList {
     adj_[src].push_back({link_index, src, dst, delay});
     all_nodes_.Insert(src);
     all_nodes_.Insert(dst);
+  }
+
+  void Clear() {
+    adj_.Clear();
+    all_nodes_.Clear();
   }
 
   // The neighbors of a node. Empty if the node is a leaf.
@@ -120,11 +126,11 @@ class AdjacencyList {
 class ShortestPath {
  public:
   ShortestPath(GraphNodeIndex src, const GraphNodeSet& dst_nodes,
-               const ConstraintSet& constraints, const AdjacencyList& adj_list,
+               const ExclusionSet& exclusion_set, const AdjacencyList& adj_list,
                const GraphNodeSet* additional_nodes_to_avoid,
                const GraphLinkSet* additional_links_to_avoid)
       : src_(src), destinations_(dst_nodes) {
-    ComputePaths(constraints, adj_list, additional_nodes_to_avoid,
+    ComputePaths(exclusion_set, adj_list, additional_nodes_to_avoid,
                  additional_links_to_avoid);
   }
 
@@ -163,7 +169,7 @@ class ShortestPath {
     }
   };
 
-  void ComputePaths(const ConstraintSet& constraints,
+  void ComputePaths(const ExclusionSet& exclusion_set,
                     const AdjacencyList& adj_list,
                     const GraphNodeSet* additional_nodes_to_avoid,
                     const GraphLinkSet* additional_links_to_avoid);
@@ -185,11 +191,11 @@ class ShortestPath {
 // figure out if the graph is partitioned.
 class AllPairShortestPath {
  public:
-  AllPairShortestPath(const ConstraintSet& constraints,
+  AllPairShortestPath(const ExclusionSet& exclusion_set,
                       const AdjacencyList& adj_list,
                       const GraphNodeSet* additional_nodes_to_avoid,
                       const GraphLinkSet* additional_links_to_avoid) {
-    ComputePaths(constraints, adj_list, additional_nodes_to_avoid,
+    ComputePaths(exclusion_set, adj_list, additional_nodes_to_avoid,
                  additional_links_to_avoid);
   }
 
@@ -212,7 +218,7 @@ class AllPairShortestPath {
   };
 
   // Populates data_.
-  void ComputePaths(const ConstraintSet& constraints,
+  void ComputePaths(const ExclusionSet& exclusion_set,
                     const AdjacencyList& adj_list,
                     const GraphNodeSet* additional_nodes_to_avoid,
                     const GraphLinkSet* additional_links_to_avoid);
@@ -289,6 +295,27 @@ class SubGraph {
 
   // Nodes/links to exclude.
   const ConstraintSet* constraints_;
+};
+
+struct SubGraphShortestPathState {
+  void Clear() {
+    to_exclude.Clear();
+    path_graph_adj_list.Clear();
+    link_map.Clear();
+  }
+
+  // Nodes to exclude.
+  GraphNodeSet to_exclude;
+
+  // The adjacency list for the graph that is created from shortest paths from
+  // each node in 'to_visit' to destinations.
+  AdjacencyList path_graph_adj_list;
+
+  // Maps a pair of src, dst with the link that represents the shortest path
+  // between them in the new graph. The link index is not into the original
+  // graph (from graph_storage) but one of the ones generated by
+  // path_graph_link_index_gen.
+  GraphLinkMap<std::pair<GraphNodeIndex, GraphNodeIndex>> link_map;
 };
 
 struct KShortestPathGeneratorStats {
@@ -385,6 +412,9 @@ class KShortestPathsGenerator {
 
   // The graph.
   const SubGraph* sub_graph_;
+
+  // State for the SP calls.
+  SubGraphShortestPathState sp_state_;
 };
 
 }  // namespace nc

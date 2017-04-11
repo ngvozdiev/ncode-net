@@ -64,8 +64,14 @@ int main(int argc, char** argv) {
          [&path_storage, &london_node, &tokyo_node, &all_paths] {
            net::DirectedGraph graph(&path_storage);
            net::ConstraintSet constraints;
-           net::SubGraph sub_graph(&graph, &constraints);
+           size_t all_nodes_count = path_storage.AllNodes().Count();
 
+           std::mt19937 rnd(1);
+           net::GraphNodeSet to_visit =
+               RandomSample(path_storage, all_nodes_count / 10, &rnd);
+           constraints.AddToVisitSet(to_visit);
+
+           net::SubGraph sub_graph(&graph, &constraints);
            sub_graph.Paths(london_node, tokyo_node,
                            [&all_paths](const net::LinkSequence& links) {
                              all_paths.emplace_back(links);
@@ -78,14 +84,13 @@ int main(int argc, char** argv) {
   TimeMs("1000 calls to shortest path", [&path_storage, &london_node,
                                          &tokyo_node, &paths] {
     net::DirectedGraph graph(&path_storage);
-
     net::ConstraintSet constraints;
     size_t all_nodes_count = path_storage.AllNodes().Count();
 
     std::mt19937 rnd(1);
     net::GraphNodeSet to_visit =
-        RandomSample(path_storage, all_nodes_count / 2, &rnd);
-    constraints.AddToVisitSet(&to_visit);
+        RandomSample(path_storage, all_nodes_count / 10, &rnd);
+    constraints.AddToVisitSet(to_visit);
 
     net::SubGraph sub_graph(&graph, &constraints);
     net::KShortestPathsGenerator ksp(london_node, tokyo_node, &sub_graph);
