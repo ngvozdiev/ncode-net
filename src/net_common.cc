@@ -338,19 +338,32 @@ const GraphLink* GraphStorage::LinkPtrFromProtobuf(const PBGraphLink& link_pb) {
   return GetLink(link_index);
 }
 
-LinkSequence::LinkSequence() : delay_(Delay::zero()) {}
-
-LinkSequence::LinkSequence(const Links& links, Delay delay)
-    : links_(links), delay_(delay) {
+bool HasDuplicateLinks(const Links& links) {
   for (size_t i = 0; i < links.size(); ++i) {
     for (size_t j = i + 1; j < links.size(); ++j) {
-      CHECK(links[i] != links[j]) << "Duplicate link " << links[i];
+      if (links[i] == links[j]) {
+        return true;
+      }
     }
+  }
+
+  return false;
+}
+
+LinkSequence::LinkSequence() : delay_(Delay::zero()) {}
+
+LinkSequence::LinkSequence(const Links& links, Delay delay,
+                           bool check_for_duplicates)
+    : links_(links), delay_(delay) {
+  if (check_for_duplicates) {
+    CHECK(!HasDuplicateLinks(links));
   }
 }
 
-LinkSequence::LinkSequence(const Links& links, const GraphStorage* storage)
-    : LinkSequence(links, TotalDelayOfLinks(links, storage)) {}
+LinkSequence::LinkSequence(const Links& links, const GraphStorage* storage,
+                           bool check_for_duplicates)
+    : LinkSequence(links, TotalDelayOfLinks(links, storage),
+                   check_for_duplicates) {}
 
 bool LinkSequence::Contains(GraphLinkIndex link) const {
   return std::find(links_.begin(), links_.end(), link) != links_.end();
@@ -400,6 +413,17 @@ std::string LinkSequence::ToStringNoPorts(const GraphStorage* storage) const {
   ss << "] ";
   ss << StrCat(delay_.count(), "μs");
   return ss.str();
+}
+
+std::string LinkSequence::ToStringIdsOnly() const {
+  std::stringstream ss;
+  if (links_.empty()) {
+    return "[]";
+  }
+
+  return StrCat("[", Join(links_, "->", [](GraphLinkIndex link) {
+                  return std::to_string(link);
+                }), "] ", delay_.count(), "μs");
 }
 
 GraphNodeIndex LinkSequence::FirstHop(const GraphStorage* storage) const {

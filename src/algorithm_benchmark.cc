@@ -69,6 +69,8 @@ int main(int argc, char** argv) {
            std::mt19937 rnd(1);
            net::GraphNodeSet to_visit =
                RandomSample(path_storage, all_nodes_count / 10, &rnd);
+           to_visit.Remove(london_node);
+           to_visit.Remove(tokyo_node);
            constraints.AddToVisitSet(to_visit);
 
            net::SubGraph sub_graph(&graph, &constraints);
@@ -90,6 +92,8 @@ int main(int argc, char** argv) {
     std::mt19937 rnd(1);
     net::GraphNodeSet to_visit =
         RandomSample(path_storage, all_nodes_count / 10, &rnd);
+    to_visit.Remove(london_node);
+    to_visit.Remove(tokyo_node);
     constraints.AddToVisitSet(to_visit);
 
     net::SubGraph sub_graph(&graph, &constraints);

@@ -26,6 +26,10 @@ class ExclusionSet {
   // Returns true if the node should be excluded.
   bool ShouldExcludeNode(const GraphNodeIndex node) const;
 
+  const GraphLinkSet& links_to_exclude() const { return links_to_exclude_; }
+
+  const GraphNodeSet& nodes_to_exclude() const { return nodes_to_exclude_; }
+
  private:
   // Links/nodes that will be excluded from the graph.
   GraphLinkSet links_to_exclude_;
@@ -59,6 +63,40 @@ class ConstraintSet {
   // Sets of nodes to visit, in the order given.
   const std::vector<GraphNodeSet>& to_visit() const { return to_visit_; }
 
+  // Will make sure that the constrains do not have 'src' in the first set to
+  // visit and 'dst' in the last set to visit.
+  ConstraintSet SanitizeConstraints(GraphNodeIndex src,
+                                    GraphNodeIndex dst) const {
+    if (to_visit_.empty()) {
+      return *this;
+    }
+
+    ConstraintSet to_return;
+    to_return.Exclude().Links(exclusion_set_.links_to_exclude());
+    to_return.Exclude().Nodes(exclusion_set_.nodes_to_exclude());
+
+    for (size_t i = 0; i < to_visit_.size(); ++i) {
+      GraphNodeSet set = to_visit_[i];
+
+      if (i == 0 && set.Contains(src)) {
+        set.Clear();
+      } else if (i == to_visit_.size() - 1 && set.Contains(dst)) {
+        set.Clear();
+      } else {
+        CHECK(!set.Contains(src) || !set.Contains(dst))
+            << "src/dst can only be part of the first/last set";
+      }
+
+      if (set.Empty()) {
+        continue;
+      }
+
+      to_return.to_visit_.emplace_back(set);
+    }
+
+    return to_return;
+  }
+
  private:
   // Links/nodes that will be excluded from the graph.
   ExclusionSet exclusion_set_;
@@ -69,8 +107,6 @@ class ConstraintSet {
   // Maps from a node index to the index of the node's set in to_visit_.
   // Building this map also helps figure out if each node is in at most one set.
   GraphNodeMap<size_t> node_to_visit_index_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConstraintSet);
 };
 
 // Maintains connectivity information about a graph, and allows for quick
@@ -348,7 +384,10 @@ class KShortestPathsGenerator {
  public:
   KShortestPathsGenerator(GraphNodeIndex src, GraphNodeIndex dst,
                           SubGraph* sub_graph)
-      : src_(src), dst_(dst), sub_graph_(sub_graph) {}
+      : src_(src),
+        dst_(dst),
+        constraints_(sub_graph->constraints()->SanitizeConstraints(src, dst)),
+        graph_(sub_graph->parent()) {}
 
   // Returns the Kth shortest path.
   LinkSequence KthShortestPath(size_t k);
@@ -410,8 +449,11 @@ class KShortestPathsGenerator {
   // The destination.
   GraphNodeIndex dst_;
 
+  // The sanitized constraints.
+  const ConstraintSet constraints_;
+
   // The graph.
-  const SubGraph* sub_graph_;
+  const DirectedGraph* graph_;
 
   // State for the SP calls.
   SubGraphShortestPathState sp_state_;

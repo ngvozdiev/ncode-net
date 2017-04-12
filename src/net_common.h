@@ -209,13 +209,18 @@ using Links = std::vector<GraphLinkIndex>;
 // Sums up the delay along a series of links.
 Delay TotalDelayOfLinks(const Links& links, const GraphStorage* graph_storage);
 
+// Returns true if the given array of links has duplicates.
+bool HasDuplicateLinks(const Links& links);
+
 // A sequence of links along with a delay. Similar to GraphPath (below), but
 // without a tag.
 class LinkSequence {
  public:
   LinkSequence();
-  LinkSequence(const Links& links, Delay delay);
-  LinkSequence(const Links& links, const GraphStorage* storage);
+  LinkSequence(const Links& links, Delay delay,
+               bool check_for_duplicates = true);
+  LinkSequence(const Links& links, const GraphStorage* storage,
+               bool check_for_duplicates = true);
 
   // Returns true if any of the links in this sequence is equal to link.
   bool Contains(GraphLinkIndex link) const;
@@ -240,6 +245,10 @@ class LinkSequence {
 
   // Shorter string representation in the form [A->B->C]
   std::string ToStringNoPorts(const GraphStorage* storage) const;
+
+  // Only prints out the ids of the edges on the path, not the string
+  // representation of their nodes.
+  std::string ToStringIdsOnly() const;
 
   // Id of the first node along the path.
   GraphNodeIndex FirstHop(const GraphStorage* storage) const;

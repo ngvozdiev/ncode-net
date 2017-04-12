@@ -320,6 +320,47 @@ TEST_F(FourEdges, SubGraphTwo) {
   ASSERT_EQ(P("[]"), sub_graph.ShortestPath(N("A"), N("B")));
 }
 
+class Ring : public ::testing::Test, public Base {
+ protected:
+  static PBNet GetPb() {
+    PBNet net;
+    AddEdgeToGraph("A", "B", Delay(100), kBw, &net);
+    AddEdgeToGraph("B", "C", Delay(100), kBw, &net);
+    AddEdgeToGraph("C", "D", Delay(100), kBw, &net);
+    AddEdgeToGraph("D", "A", Delay(100), kBw, &net);
+    AddEdgeToGraph("B", "E", Delay(100), kBw, &net);
+    AddEdgeToGraph("C", "E", Delay(100000), kBw, &net);
+    return net;
+  }
+
+  Ring() : Base(GetPb()) {}
+};
+
+TEST_F(Ring, DuplicateLink) {
+  DirectedGraph graph(&storage_);
+
+  ConstraintSet constraints;
+  constraints.AddToVisitSet({N("C")});
+
+  SubGraph sub_graph(&graph, &constraints);
+
+  // The shortest way to get to E from A via C would repeat A->B.
+  ASSERT_EQ(P("[A->B, B->C, C->E]"), sub_graph.ShortestPath(N("A"), N("E")));
+}
+
+TEST_F(Ring, DuplicateLinkNoAvoid) {
+  DirectedGraph graph(&storage_);
+
+  ConstraintSet constraints;
+  constraints.Exclude().Links({L("C", "E")});
+  constraints.AddToVisitSet({N("C")});
+
+  SubGraph sub_graph(&graph, &constraints);
+
+  // The shortest way to get to E from A via C would repeat A->B.
+  ASSERT_EQ(P("[]"), sub_graph.ShortestPath(N("A"), N("E")));
+}
+
 class Braess : public ::testing::Test, public Base {
  protected:
   static PBNet GetPb() { return GenerateBraess(kBw); }
