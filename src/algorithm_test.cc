@@ -158,32 +158,36 @@ class FourEdges : public ::testing::Test, public Base {
 
 TEST_F(FourEdges, VisitConstraintsMet) {
   ConstraintSet constraints;
-  ASSERT_TRUE(constraints.OrderOk(P("[A->D]").links(), &storage_));
+  ASSERT_EQ(0, constraints.MinVisit(P("[A->D]").links(), &storage_));
 
   constraints.AddToVisitSet({N("B")});
-  ASSERT_FALSE(constraints.OrderOk(P("[A->D]").links(), &storage_));
-  ASSERT_TRUE(constraints.OrderOk(P("[A->B]").links(), &storage_));
-  ASSERT_TRUE(constraints.OrderOk(P("[A->B, B->C]").links(), &storage_));
+  ASSERT_EQ(0, constraints.MinVisit(P("[A->D]").links(), &storage_));
+  ASSERT_EQ(1, constraints.MinVisit(P("[A->B]").links(), &storage_));
+  ASSERT_EQ(1, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
 
   constraints.AddToVisitSet({N("C")});
-  ASSERT_FALSE(constraints.OrderOk(P("[A->D]").links(), &storage_));
-  ASSERT_FALSE(constraints.OrderOk(P("[A->B]").links(), &storage_));
-  ASSERT_TRUE(constraints.OrderOk(P("[A->B, B->C]").links(), &storage_));
+  ASSERT_EQ(0, constraints.MinVisit(P("[A->D]").links(), &storage_));
+  ASSERT_EQ(1, constraints.MinVisit(P("[A->B]").links(), &storage_));
+  ASSERT_EQ(2, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
 
   constraints.AddToVisitSet({N("D")});
-  ASSERT_FALSE(constraints.OrderOk({}, &storage_));
-  ASSERT_TRUE(constraints.OrderOk(P("[A->B, B->C, C->D]").links(), &storage_));
+  ASSERT_EQ(0, constraints.MinVisit({}, &storage_));
+  ASSERT_EQ(1, constraints.MinVisit(P("[A->B]").links(), &storage_));
+  ASSERT_EQ(2, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
+  ASSERT_EQ(3,
+            constraints.MinVisit(P("[A->B, B->C, C->D]").links(), &storage_));
 }
 
 TEST_F(FourEdges, VisitConstraintsMetTwo) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("B"), N("C")});
 
-  ASSERT_FALSE(constraints.OrderOk(P("[A->D]").links(), &storage_));
-  ASSERT_TRUE(constraints.OrderOk(P("[A->B]").links(), &storage_));
-  ASSERT_TRUE(constraints.OrderOk(P("[A->B, B->C]").links(), &storage_));
-  ASSERT_TRUE(constraints.OrderOk(P("[B->C]").links(), &storage_));
-  ASSERT_TRUE(constraints.OrderOk(P("[A->B, B->C, C->D]").links(), &storage_));
+  ASSERT_EQ(0, constraints.MinVisit(P("[A->D]").links(), &storage_));
+  ASSERT_EQ(1, constraints.MinVisit(P("[A->B]").links(), &storage_));
+  ASSERT_EQ(1, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
+  ASSERT_EQ(1, constraints.MinVisit(P("[B->C]").links(), &storage_));
+  ASSERT_EQ(1,
+            constraints.MinVisit(P("[A->B, B->C, C->D]").links(), &storage_));
 }
 
 TEST_F(FourEdges, VisitConstraintsMetThree) {
@@ -191,11 +195,12 @@ TEST_F(FourEdges, VisitConstraintsMetThree) {
   constraints.AddToVisitSet({N("A"), N("D")});
   constraints.AddToVisitSet({N("B"), N("C")});
 
-  ASSERT_FALSE(constraints.OrderOk(P("[A->D]").links(), &storage_));
-  ASSERT_TRUE(constraints.OrderOk(P("[A->B]").links(), &storage_));
-  ASSERT_TRUE(constraints.OrderOk(P("[A->B, B->C]").links(), &storage_));
-  ASSERT_FALSE(constraints.OrderOk(P("[B->C]").links(), &storage_));
-  ASSERT_FALSE(constraints.OrderOk(P("[A->B, B->C, C->D]").links(), &storage_));
+  ASSERT_EQ(1, constraints.MinVisit(P("[A->D]").links(), &storage_));
+  ASSERT_EQ(2, constraints.MinVisit(P("[A->B]").links(), &storage_));
+  ASSERT_EQ(2, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
+  ASSERT_EQ(0, constraints.MinVisit(P("[B->C]").links(), &storage_));
+  ASSERT_EQ(0,
+            constraints.MinVisit(P("[A->B, B->C, C->D]").links(), &storage_));
 }
 
 TEST_F(FourEdges, ShortestPath) {
@@ -294,8 +299,7 @@ TEST_F(FourEdges, ShortestPathVisitConstraintTwoSets) {
 
   SubGraph sub_graph(&graph, &constraints);
 
-  // Empty because 'D' is in the source set.
-  ASSERT_EQ(P("[]"), sub_graph.ShortestPath(N("A"), N("D")));
+  ASSERT_EQ(P("[A->B, B->C, C->D]"), sub_graph.ShortestPath(N("A"), N("D")));
   ASSERT_EQ(P("[A->B, B->C]"), sub_graph.ShortestPath(N("A"), N("C")));
   ASSERT_EQ(P("[A->B]"), sub_graph.ShortestPath(N("A"), N("B")));
 }
@@ -397,6 +401,28 @@ TEST_F(Braess, DFS) {
   ASSERT_EQ(P("[A->C, C->D]"), paths[0]);
   ASSERT_EQ(P("[A->B, B->D]"), paths[1]);
   ASSERT_EQ(P("[A->B, B->C, C->D]"), paths[2]);
+}
+
+TEST_F(Braess, DFSNotSimple) {
+  DirectedGraph graph(&storage_);
+
+  ConstraintSet constraints;
+  SubGraph sub_graph(&graph, &constraints);
+
+  std::vector<LinkSequence> paths;
+  sub_graph.Paths(N("A"), N("D"), [&paths](const LinkSequence& path) {
+    paths.emplace_back(path);
+  }, false);
+
+  std::sort(paths.begin(), paths.end());
+  ASSERT_EQ(7ul, paths.size());
+  ASSERT_EQ(P("[A->C, C->D]"), paths[0]);
+  ASSERT_EQ(P("[A->B, B->D]"), paths[1]);
+  ASSERT_EQ(P("[A->B, B->C, C->D]"), paths[2]);
+  ASSERT_EQ(P("[A->C, C->A, A->B, B->D]"), paths[3]);
+  ASSERT_EQ(P("[A->B, B->C, C->A, A->C, C->D]"), paths[4]);
+  ASSERT_EQ(P("[A->C, C->A, A->B, B->C, C->D]"), paths[5]);
+  ASSERT_EQ(P("[A->B, B->A, A->C, C->D]"), paths[6]);
 }
 
 TEST_F(Braess, DFSConstraint) {

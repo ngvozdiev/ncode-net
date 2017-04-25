@@ -350,13 +350,57 @@ bool HasDuplicateLinks(const Links& links) {
   return false;
 }
 
+std::pair<size_t, size_t> LinksDetour(const Links& path_one,
+                                      const Links& path_two) {
+  CHECK(!path_one.empty());
+  CHECK(!path_two.empty());
+  size_t detour_start = std::numeric_limits<size_t>::max();
+  for (size_t i = 0; i < path_one.size(); ++i) {
+    net::GraphLinkIndex link_one = path_one[i];
+    net::GraphLinkIndex link_two = path_two[i];
+    if (link_one != link_two) {
+      detour_start = i;
+      break;
+    }
+  }
+
+  if (detour_start == std::numeric_limits<size_t>::max()) {
+    return {std::numeric_limits<size_t>::max(),
+            std::numeric_limits<size_t>::max()};
+  }
+
+  size_t detour_end = std::numeric_limits<size_t>::max();
+  size_t path_one_size = path_one.size();
+  size_t path_two_size = path_two.size();
+  for (size_t i = 1; i < path_one.size(); ++i) {
+    net::GraphLinkIndex link_one = path_one[path_one_size - i];
+    net::GraphLinkIndex link_two = path_two[path_two_size - i];
+    if (link_one != link_two) {
+      detour_end = i;
+      break;
+    }
+  }
+
+  return {detour_start, path_two.size() - detour_end};
+}
+
+std::string GraphLinkSetToString(const GraphLinkSet& links,
+                                 const GraphStorage* graph_storage) {
+  std::vector<std::string> link_names;
+  for (GraphLinkIndex link_index : links) {
+    link_names.emplace_back(
+        graph_storage->GetLink(link_index)->ToStringNoPorts());
+  }
+  return StrCat("{", Join(link_names, ","), "}");
+}
+
 LinkSequence::LinkSequence() : delay_(Delay::zero()) {}
 
 LinkSequence::LinkSequence(const Links& links, Delay delay,
                            bool check_for_duplicates)
     : links_(links), delay_(delay) {
   if (check_for_duplicates) {
-    CHECK(!HasDuplicateLinks(links));
+    CHECK(!HasDuplicateLinks(links)) << "Duplicate link";
   }
 }
 
@@ -374,6 +418,25 @@ bool LinkSequence::ContainsAny(GraphLinkSet links) const {
     if (links.Contains(link_index)) {
       return true;
     }
+  }
+
+  return false;
+}
+
+bool LinkSequence::HasDuplicateNodes(const GraphStorage* graph_storage) const {
+  if (links_.empty()) {
+    return false;
+  }
+
+  GraphNodeSet nodes;
+  GraphNodeIndex src_of_path = graph_storage->GetLink(links_[0])->src();
+  nodes.Insert(src_of_path);
+  for (size_t i = 0; i < links_.size(); ++i) {
+    GraphNodeIndex dst = graph_storage->GetLink(links_[i])->dst();
+    if (nodes.Contains(dst)) {
+      return true;
+    }
+    nodes.Insert(dst);
   }
 
   return false;
@@ -858,6 +921,10 @@ GraphLink::GraphLink(GraphNodeIndex src, GraphNodeIndex dst,
 std::string GraphLink::ToString() const {
   return Substitute("$0:$1->$2:$3", src_node_->id(), src_port_.Raw(),
                     dst_node_->id(), dst_port_.Raw());
+}
+
+std::string GraphLink::ToStringNoPorts() const {
+  return Substitute("$0->$1", src_node_->id(), dst_node_->id());
 }
 
 PBGraphLink GraphLink::ToProtobuf() const {

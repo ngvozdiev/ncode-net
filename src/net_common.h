@@ -165,6 +165,9 @@ class GraphLink {
   // Returns a string in the form A:sport->B:dport
   std::string ToString() const;
 
+  // Returns a string in the form A->B
+  std::string ToStringNoPorts() const;
+
   PBGraphLink ToProtobuf() const;
 
  private:
@@ -200,6 +203,10 @@ class GraphLink {
 using GraphLinkIndex = Index<GraphLink, uint16_t>;
 using GraphLinkSet = PerfectHashSet<uint16_t, GraphLink>;
 
+// Prints the set of links.
+std::string GraphLinkSetToString(const GraphLinkSet& links,
+                                 const GraphStorage* graph_storage);
+
 template <typename V>
 using GraphLinkMap = PerfectHashMap<uint16_t, GraphLink, V>;
 
@@ -211,6 +218,16 @@ Delay TotalDelayOfLinks(const Links& links, const GraphStorage* graph_storage);
 
 // Returns true if the given array of links has duplicates.
 bool HasDuplicateLinks(const Links& links);
+
+// Returns true if the given array of links has nodes.
+bool HasDuplicateNodes(const Links& links, const GraphStorage* graph_storage);
+
+// Returns the detour of 'path_two' from 'path_one'. Paths should start/end at
+// the same node. The detour is returned as a pair of indices into path_two that
+// indicate the start/end of the detour. If the two paths are the same {-1, -1}
+// is returned.
+std::pair<size_t, size_t> LinksDetour(const Links& path_one,
+                                      const Links& path_two);
 
 // A sequence of links along with a delay. Similar to GraphPath (below), but
 // without a tag.
@@ -258,6 +275,10 @@ class LinkSequence {
 
   // Rough estimate of the number of bytes of memory this LinkSequence uses.
   size_t InMemBytesEstimate() const;
+
+  // Returns true if this LinkSequence has duplicate hops. The link sequence is
+  // assumed to be a path.
+  bool HasDuplicateNodes(const GraphStorage* graph_storage) const;
 
   friend bool operator<(const LinkSequence& a, const LinkSequence& b);
   friend bool operator==(const LinkSequence& a, const LinkSequence& b);

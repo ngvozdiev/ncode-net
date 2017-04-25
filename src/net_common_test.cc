@@ -371,16 +371,16 @@ TEST_F(GraphStorageTest, NodesInSameRegion) {
   ASSERT_TRUE(in_region.Contains(node_b));
 }
 
-static PBNet SetUpGraph() {
-  PBNet graph;
-  AddEdgeToGraph("A", "B", kDelay, kBw, &graph);
-  AddEdgeToGraph("B", "A", kDelay, kBw, &graph);
-  AddEdgeToGraph("B", "C", kDelay, kBw, &graph);
-  return graph;
-}
-
 class PathStorageTest : public ::testing::Test {
  protected:
+  static PBNet SetUpGraph() {
+    PBNet graph;
+    AddEdgeToGraph("A", "B", kDelay, kBw, &graph);
+    AddEdgeToGraph("B", "A", kDelay, kBw, &graph);
+    AddEdgeToGraph("B", "C", kDelay, kBw, &graph);
+    return graph;
+  }
+
   PathStorageTest() : storage_(SetUpGraph()) {}
   GraphStorage storage_;
 };
@@ -562,6 +562,76 @@ TEST(Partitioned, NoPartition) {
   AddBiEdgeToGraph("C", "D", microseconds(10), kBw, &net);
   AddBiEdgeToGraph("C", "Z", microseconds(10), kBw, &net);
   ASSERT_FALSE(IsPartitioned(net));
+}
+
+class DetourTest : public ::testing::Test {
+ protected:
+  static PBNet SetUpGraph() {
+    PBNet graph;
+    AddEdgeToGraph("A", "B", kDelay, kBw, &graph);
+    AddEdgeToGraph("B", "C", kDelay, kBw, &graph);
+    AddEdgeToGraph("C", "D", kDelay, kBw, &graph);
+    AddEdgeToGraph("D", "E", kDelay, kBw, &graph);
+    AddEdgeToGraph("B", "F", kDelay, kBw, &graph);
+    AddEdgeToGraph("F", "C", kDelay, kBw, &graph);
+    AddEdgeToGraph("F", "G", kDelay, kBw, &graph);
+    AddEdgeToGraph("G", "D", kDelay, kBw, &graph);
+    AddEdgeToGraph("G", "C", kDelay, kBw, &graph);
+    AddEdgeToGraph("A", "F", kDelay, kBw, &graph);
+    AddEdgeToGraph("G", "E", kDelay, kBw, &graph);
+
+    return graph;
+  }
+
+  Links GetLinks(const std::string& str) {
+    return storage_.PathFromStringOrDie(str, 0)->link_sequence().links();
+  }
+
+  DetourTest() : storage_(SetUpGraph()) {}
+  GraphStorage storage_;
+};
+
+TEST_F(DetourTest, NoDetour) {
+  std::pair<size_t, size_t> model = {std::numeric_limits<size_t>::max(),
+                                     std::numeric_limits<size_t>::max()};
+  ASSERT_DEATH(LinksDetour({}, {}), ".*");
+  ASSERT_EQ(model, LinksDetour(GetLinks("[A->B, B->C, C->D]"),
+                               GetLinks("[A->B, B->C, C->D]")));
+  ASSERT_EQ(model, LinksDetour(GetLinks("[A->B]"), GetLinks("[A->B]")));
+}
+
+TEST_F(DetourTest, SingleNodeDetour) {
+  std::pair<size_t, size_t> model = {1, 2};
+
+  ASSERT_EQ(model, LinksDetour(GetLinks("[A->B, B->C, C->D, D->E]"),
+                               GetLinks("[A->B, B->F, F->C, C->D, D->E]")));
+  ASSERT_EQ(model, LinksDetour(GetLinks("[A->B, B->C, C->D]"),
+                               GetLinks("[A->B, B->F, F->C, C->D]")));
+  ASSERT_EQ(model, LinksDetour(GetLinks("[A->B, B->C]"),
+                               GetLinks("[A->B, B->F, F->C]")));
+}
+
+TEST_F(DetourTest, MultiNodeDetour) {
+  std::pair<size_t, size_t> model = {1, 3};
+  ASSERT_EQ(model, LinksDetour(GetLinks("[A->B, B->C, C->D, D->E]"),
+                               GetLinks("[A->B, B->F, F->G, G->D, D->E]")));
+  ASSERT_EQ(model, LinksDetour(GetLinks("[A->B, B->C, C->D]"),
+                               GetLinks("[A->B, B->F, F->G, G->D]")));
+}
+
+TEST_F(DetourTest, MultiNodeDetourTwo) {
+  std::pair<size_t, size_t> model = {1, 3};
+  ASSERT_EQ(model,
+            LinksDetour(GetLinks("[A->B, B->C, C->D, D->E]"),
+                        GetLinks("[A->B, B->F, F->G, G->C, C->D, D->E]")));
+  ASSERT_EQ(model, LinksDetour(GetLinks("[A->B, B->C, C->D]"),
+                               GetLinks("[A->B, B->F, F->G, G->C, C->D]")));
+}
+
+TEST_F(DetourTest, FullDetour) {
+  std::pair<size_t, size_t> model = {0, 2};
+  ASSERT_EQ(model, LinksDetour(GetLinks("[A->B, B->C, C->D, D->E]"),
+                               GetLinks("[A->F, F->G, G->E]")));
 }
 
 }  // namespace
