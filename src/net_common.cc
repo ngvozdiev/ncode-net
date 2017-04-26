@@ -384,6 +384,15 @@ std::pair<size_t, size_t> LinksDetour(const Links& path_one,
   return {detour_start, path_two.size() - detour_end};
 }
 
+std::string GraphNodeSetToString(const GraphNodeSet& nodes,
+                                 const GraphStorage* graph_storage) {
+  std::vector<std::string> node_names;
+  for (GraphNodeIndex node_index : nodes) {
+    node_names.emplace_back(graph_storage->GetNode(node_index)->id());
+  }
+  return StrCat("{", Join(node_names, ","), "}");
+}
+
 std::string GraphLinkSetToString(const GraphLinkSet& links,
                                  const GraphStorage* graph_storage) {
   std::vector<std::string> link_names;

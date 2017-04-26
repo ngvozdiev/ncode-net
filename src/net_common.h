@@ -140,6 +140,10 @@ class GraphNode {
 using GraphNodeIndex = Index<GraphNode, uint16_t>;
 using GraphNodeSet = PerfectHashSet<uint16_t, GraphNode>;
 
+// Prints a set of nodes.
+std::string GraphNodeSetToString(const GraphNodeSet& nodes,
+                                 const GraphStorage* graph_storage);
+
 template <typename V>
 using GraphNodeMap = PerfectHashMap<uint16_t, GraphNode, V>;
 
@@ -203,7 +207,7 @@ class GraphLink {
 using GraphLinkIndex = Index<GraphLink, uint16_t>;
 using GraphLinkSet = PerfectHashSet<uint16_t, GraphLink>;
 
-// Prints the set of links.
+// Prints a set of links.
 std::string GraphLinkSetToString(const GraphLinkSet& links,
                                  const GraphStorage* graph_storage);
 

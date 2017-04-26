@@ -158,23 +158,23 @@ class FourEdges : public ::testing::Test, public Base {
 
 TEST_F(FourEdges, VisitConstraintsMet) {
   ConstraintSet constraints;
-  ASSERT_EQ(0, constraints.MinVisit(P("[A->D]").links(), &storage_));
+  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]").links(), &storage_));
 
   constraints.AddToVisitSet({N("B")});
-  ASSERT_EQ(0, constraints.MinVisit(P("[A->D]").links(), &storage_));
-  ASSERT_EQ(1, constraints.MinVisit(P("[A->B]").links(), &storage_));
-  ASSERT_EQ(1, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
+  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]").links(), &storage_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]").links(), &storage_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
 
   constraints.AddToVisitSet({N("C")});
-  ASSERT_EQ(0, constraints.MinVisit(P("[A->D]").links(), &storage_));
-  ASSERT_EQ(1, constraints.MinVisit(P("[A->B]").links(), &storage_));
-  ASSERT_EQ(2, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
+  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]").links(), &storage_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]").links(), &storage_));
+  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
 
   constraints.AddToVisitSet({N("D")});
-  ASSERT_EQ(0, constraints.MinVisit({}, &storage_));
-  ASSERT_EQ(1, constraints.MinVisit(P("[A->B]").links(), &storage_));
-  ASSERT_EQ(2, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
-  ASSERT_EQ(3,
+  ASSERT_EQ(0ul, constraints.MinVisit({}, &storage_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]").links(), &storage_));
+  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
+  ASSERT_EQ(3ul,
             constraints.MinVisit(P("[A->B, B->C, C->D]").links(), &storage_));
 }
 
@@ -182,24 +182,24 @@ TEST_F(FourEdges, VisitConstraintsMetTwo) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("B"), N("C")});
 
-  ASSERT_EQ(0, constraints.MinVisit(P("[A->D]").links(), &storage_));
-  ASSERT_EQ(1, constraints.MinVisit(P("[A->B]").links(), &storage_));
-  ASSERT_EQ(1, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
-  ASSERT_EQ(1, constraints.MinVisit(P("[B->C]").links(), &storage_));
-  ASSERT_EQ(1,
+  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]").links(), &storage_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]").links(), &storage_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[B->C]").links(), &storage_));
+  ASSERT_EQ(1ul,
             constraints.MinVisit(P("[A->B, B->C, C->D]").links(), &storage_));
 }
 
 TEST_F(FourEdges, VisitConstraintsMetThree) {
   ConstraintSet constraints;
-  constraints.AddToVisitSet({N("A"), N("D")});
-  constraints.AddToVisitSet({N("B"), N("C")});
+  constraints.AddToVisitSet({N("A")});
+  constraints.AddToVisitSet({N("C")});
 
-  ASSERT_EQ(1, constraints.MinVisit(P("[A->D]").links(), &storage_));
-  ASSERT_EQ(2, constraints.MinVisit(P("[A->B]").links(), &storage_));
-  ASSERT_EQ(2, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
-  ASSERT_EQ(0, constraints.MinVisit(P("[B->C]").links(), &storage_));
-  ASSERT_EQ(0,
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->D]").links(), &storage_));
+  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B]").links(), &storage_));
+  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C]").links(), &storage_));
+  ASSERT_EQ(0ul, constraints.MinVisit(P("[B->C]").links(), &storage_));
+  ASSERT_EQ(0ul,
             constraints.MinVisit(P("[A->B, B->C, C->D]").links(), &storage_));
 }
 
@@ -324,6 +324,29 @@ TEST_F(FourEdges, SubGraphTwo) {
   ASSERT_EQ(P("[]"), sub_graph.ShortestPath(N("A"), N("B")));
 }
 
+TEST_F(FourEdges, KSPImpossible) {
+  DirectedGraph graph(&storage_);
+
+  ConstraintSet constraints;
+  SubGraph sub_graph(&graph, &constraints);
+
+  KShortestPathsGenerator ksp(N("D"), N("A"), &sub_graph);
+  ASSERT_EQ(P("[]"), ksp.KthShortestPath(0));
+  ASSERT_EQ(P("[]"), ksp.KthShortestPath(1));
+}
+
+TEST_F(FourEdges, KSPConstraintImpossible) {
+  DirectedGraph graph(&storage_);
+
+  ConstraintSet constraints;
+  constraints.AddToVisitSet({N("A")});
+  SubGraph sub_graph(&graph, &constraints);
+
+  KShortestPathsGenerator ksp(N("C"), N("D"), &sub_graph);
+  ASSERT_EQ(P("[]"), ksp.KthShortestPath(0));
+  ASSERT_EQ(P("[]"), ksp.KthShortestPath(1));
+}
+
 class Ring : public ::testing::Test, public Base {
  protected:
   static PBNet GetPb() {
@@ -394,7 +417,7 @@ TEST_F(Braess, DFS) {
   std::vector<LinkSequence> paths;
   sub_graph.Paths(N("A"), N("D"), [&paths](const LinkSequence& path) {
     paths.emplace_back(path);
-  });
+  }, {});
 
   std::sort(paths.begin(), paths.end());
   ASSERT_EQ(3ul, paths.size());
@@ -409,10 +432,13 @@ TEST_F(Braess, DFSNotSimple) {
   ConstraintSet constraints;
   SubGraph sub_graph(&graph, &constraints);
 
+  DFSConfig dfs_config;
+  dfs_config.simple = false;
+
   std::vector<LinkSequence> paths;
   sub_graph.Paths(N("A"), N("D"), [&paths](const LinkSequence& path) {
     paths.emplace_back(path);
-  }, false);
+  }, dfs_config);
 
   std::sort(paths.begin(), paths.end());
   ASSERT_EQ(7ul, paths.size());
@@ -435,7 +461,7 @@ TEST_F(Braess, DFSConstraint) {
   std::vector<LinkSequence> paths;
   sub_graph.Paths(N("A"), N("D"), [&paths](const LinkSequence& path) {
     paths.emplace_back(path);
-  });
+  }, {});
 
   ASSERT_EQ(1ul, paths.size());
   ASSERT_EQ(P("[A->C, C->D]"), paths[0]);
@@ -451,7 +477,7 @@ TEST_F(Braess, DFSVisitConstraint) {
   std::vector<LinkSequence> paths;
   sub_graph.Paths(N("A"), N("D"), [&paths](const LinkSequence& path) {
     paths.emplace_back(path);
-  });
+  }, {});
 
   std::sort(paths.begin(), paths.end());
   ASSERT_EQ(2ul, paths.size());
@@ -496,6 +522,19 @@ TEST_F(Braess, KSPVistConstraint) {
   ASSERT_EQ(P("[A->C, C->D]"), ksp.KthShortestPath(0));
   ASSERT_EQ(P("[A->B, B->C, C->D]"), ksp.KthShortestPath(1));
   ASSERT_EQ(P("[]"), ksp.KthShortestPath(2));
+}
+
+TEST_F(Braess, KSPVisitConstraintNonSimple) {
+  DirectedGraph graph(&storage_);
+
+  ConstraintSet constraints;
+  constraints.AddToVisitSet({N("C")});
+  constraints.AddToVisitSet({N("B")});
+  SubGraph sub_graph(&graph, &constraints);
+
+  KShortestPathsGenerator ksp(N("A"), N("D"), &sub_graph);
+  ASSERT_EQ(P("[A->C, C->A, A->B, B->D]"), ksp.KthShortestPath(0));
+  ASSERT_EQ(P("[]"), ksp.KthShortestPath(1));
 }
 
 }  // namespace

@@ -38,6 +38,7 @@ void ConstraintSet::AddToVisitSet(const GraphNodeSet& set) {
 
 size_t ConstraintSet::MinVisit(const Links& links,
                                const GraphStorage* graph_storage) const {
+//  LOG(ERROR) << "AAAA";
   int current_index = -1;
   if (links.empty()) {
     return 0;
@@ -47,6 +48,7 @@ size_t ConstraintSet::MinVisit(const Links& links,
   GraphNodeIndex path_src = link_ptr->src();
   if (node_to_visit_index_.HasValue(path_src)) {
     int i = node_to_visit_index_.GetValueOrDie(path_src);
+//    LOG(ERROR) << "I " << i << " CI " << current_index;
     if (current_index != i && (current_index + 1) != i) {
       return current_index + 1;
     }
@@ -60,6 +62,11 @@ size_t ConstraintSet::MinVisit(const Links& links,
 
     if (node_to_visit_index_.HasValue(dst)) {
       int i = node_to_visit_index_.GetValueOrDie(dst);
+//      LOG(ERROR) << "I " << i << " CI " << current_index;
+      if (i < current_index) {
+        return i + 1;
+      }
+
       if (current_index != i && (current_index + 1) != i) {
         return current_index + 1;
       }
@@ -93,38 +100,38 @@ void DirectedGraph::PopulateAdjacencyList() {
 }
 
 void SubGraph::Paths(GraphNodeIndex src, GraphNodeIndex dst,
-                     PathCallback path_callback, bool simple,
-                     Delay max_distance, size_t max_hops) const {
+                     PathCallback path_callback,
+                     const DFSConfig& config) const {
   Delay total_distance = Delay::zero();
   GraphLinkSet links_seen;
   GraphNodeSet nodes_seen;
   Links scratch_path;
-  PathsRecursive(max_distance, max_hops, src, dst, path_callback, &links_seen,
-                 &nodes_seen, &scratch_path, &total_distance, simple);
+  PathsRecursive(config, src, dst, path_callback, &links_seen, &nodes_seen,
+                 &scratch_path, &total_distance);
 }
 
-void SubGraph::PathsRecursive(Delay max_distance, size_t max_hops,
-                              GraphNodeIndex at, GraphNodeIndex dst,
-                              PathCallback path_callback,
+void SubGraph::PathsRecursive(const DFSConfig& config, GraphNodeIndex at,
+                              GraphNodeIndex dst, PathCallback path_callback,
                               GraphLinkSet* links_seen,
                               GraphNodeSet* nodes_seen, Links* current,
-                              Delay* total_distance, bool simple) const {
-  if (current->size() > max_hops) {
+                              Delay* total_distance) const {
+  if (current->size() > config.max_hops) {
     return;
   }
 
   if (at == dst) {
-    if (constraints_->MinVisit(*current, parent_->graph_storage()) !=
-        constraints_->to_visit().size()) {
+    size_t min_v = constraints_->MinVisit(*current, parent_->graph_storage());
+    if (min_v != constraints_->to_visit().size()) {
       return;
     }
 
+//    LOG(ERROR) << "min v " << min_v;
     path_callback(LinkSequence(*current, *total_distance));
     return;
   }
 
   Delay min_distance = *total_distance;
-  if (min_distance > max_distance) {
+  if (min_distance > config.max_distance) {
     return;
   }
 
@@ -132,7 +139,7 @@ void SubGraph::PathsRecursive(Delay max_distance, size_t max_hops,
   const std::vector<AdjacencyList::LinkInfo>& outgoing_links =
       adjacency_list.GetNeighbors(at);
 
-  if (simple) {
+  if (config.simple) {
     if (nodes_seen->Contains(at)) {
       return;
     }
@@ -150,7 +157,7 @@ void SubGraph::PathsRecursive(Delay max_distance, size_t max_hops,
       continue;
     }
 
-    if (!simple) {
+    if (!config.simple) {
       if (links_seen->Contains(link_index)) {
         continue;
       }
@@ -159,17 +166,17 @@ void SubGraph::PathsRecursive(Delay max_distance, size_t max_hops,
 
     current->push_back(link_index);
     *total_distance += out_link_info.delay;
-    PathsRecursive(max_distance, max_hops, next_hop, dst, path_callback,
-                   links_seen, nodes_seen, current, total_distance, simple);
+    PathsRecursive(config, next_hop, dst, path_callback, links_seen, nodes_seen,
+                   current, total_distance);
     *total_distance -= out_link_info.delay;
     current->pop_back();
 
-    if (!simple) {
+    if (!config.simple) {
       links_seen->Remove(link_index);
     }
   }
 
-  if (simple) {
+  if (config.simple) {
     nodes_seen->Remove(at);
   }
 }
@@ -461,8 +468,6 @@ static LinkSequence ShortestPathStatic(
   // Will assume that the front/back do not contain the src/dst, as it makes it
   // easier to reason about order. This is enforced elsewhere.
   for (size_t i = -1; i != to_visit_count; ++i) {
-    //    LOG(ERROR) << "I " << i;
-
     // For each set we will compute the SP trees rooted at each node. Each of
     // those SP trees should avoid nodes from other sets, except for the next
     // set.
@@ -492,31 +497,12 @@ static LinkSequence ShortestPathStatic(
       sources.InsertAll(set_to_visit);
     }
 
-    //    std::string out;
-    //    for (GraphNodeIndex n : destinations) {
-    //      out += " " + std::to_string(n);
-    //    }
-    //    LOG(ERROR) << "D " << out;
-    //
-    //    out = "";
-    //    for (GraphNodeIndex n : sources) {
-    //      out += " " + std::to_string(n);
-    //    }
-    //    LOG(ERROR) << "S " << out;
-    //
-    //    out = "";
-    //    for (GraphNodeIndex n : to_exclude) {
-    //      out += " " + std::to_string(n);
-    //    }
-    //    LOG(ERROR) << "TE " << out;
-
     CHECK(!sources.Empty());
     CHECK(!destinations.Empty());
     to_exclude.InsertAll(nodes_to_avoid);
 
     bool no_path_found = true;
     for (GraphNodeIndex node_to_visit : sources) {
-      //      LOG(ERROR) << "Will run SP rooted at " << node_to_visit;
       std::unique_ptr<net::ShortestPath>& tree = sp_trees[node_to_visit];
       tree = make_unique<net::ShortestPath>(node_to_visit, destinations,
                                             exclusion_set, adj_list,
@@ -527,19 +513,12 @@ static LinkSequence ShortestPathStatic(
 
         Delay sp_delay = tree->GetPathDistance(destination);
         if (sp_delay == Delay::max()) {
-          //          LOG(ERROR) << "No path found";
           continue;
         }
 
         path_graph_adj_list.AddLink(new_link_index, node_to_visit, destination,
                                     sp_delay);
         link_map[new_link_index] = {node_to_visit, destination};
-        //        LOG(ERROR) << "SP " << node_to_visit << " -> " << destination
-        //        << " li "
-        //                   << new_link_index << " delay " << sp_delay.count()
-        //                   << " => "
-        //                   <<
-        //                   tree->GetPath(destination).ToStringNoPorts(graph_storage);
         no_path_found = false;
       }
     }
@@ -636,6 +615,10 @@ bool KShortestPathsGenerator::NextPath() {
 
   if (k_paths_.empty()) {
     LinkSequence path = ShortestPath(src_, dst_, {}, {}, {});
+    if (path.empty()) {
+      return false;
+    }
+
     k_paths_trie_.Add(path.links(), 0);
     k_paths_.emplace_back(path, 0);
     return true;

@@ -30,6 +30,12 @@ class ExclusionSet {
 
   const GraphNodeSet& nodes_to_exclude() const { return nodes_to_exclude_; }
 
+  std::string ToString(const GraphStorage* storage) const {
+    return Substitute("exclude links: $0, exclude nodes: $1",
+                      GraphLinkSetToString(links_to_exclude_, storage),
+                      GraphNodeSetToString(nodes_to_exclude_, storage));
+  }
+
  private:
   // Links/nodes that will be excluded from the graph.
   GraphLinkSet links_to_exclude_;
@@ -101,6 +107,17 @@ class ConstraintSet {
     return to_return;
   }
 
+  std::string ToString(const GraphStorage* storage) const {
+    std::vector<std::string> visit_constraints;
+    for (const auto& set_to_visit : to_visit_) {
+      visit_constraints.emplace_back(
+          GraphNodeSetToString(set_to_visit, storage));
+    }
+
+    return Substitute("$0, visit nodes $1", exclusion_set_.ToString(storage),
+                      Join(visit_constraints, "->"));
+  }
+
  private:
   // Links/nodes that will be excluded from the graph.
   ExclusionSet exclusion_set_;
@@ -152,7 +169,7 @@ class AdjacencyList {
   }
 
  private:
-  // An empty vector that GetNeighbors can return a reference to;
+  // An empty vector that GetNeighbors can return a reference to.
   std::vector<LinkInfo> empty_;
 
   // For each node its neighbors.
@@ -298,7 +315,15 @@ class DirectedGraph {
   const GraphStorage* graph_storage_;
 };
 
-// Subset of a directed graph.
+// Configuration for a DFS.
+struct DFSConfig {
+  bool simple = true;
+  Delay max_distance = Delay::max();
+  size_t max_hops = std::numeric_limits<size_t>::max();
+};
+
+// A directed graph and a set of constraints. Contains basic DFS and SP
+// functionality.
 class SubGraph {
  public:
   using PathCallback = std::function<void(const LinkSequence&)>;
@@ -308,8 +333,7 @@ class SubGraph {
 
   // Calls a callback with all paths between a source and a destination.
   void Paths(GraphNodeIndex src, GraphNodeIndex dst, PathCallback path_callback,
-             bool simple = true, Delay max_distance = Delay::max(),
-             size_t max_hops = std::numeric_limits<size_t>::max()) const;
+             const DFSConfig& dfs_config) const;
 
   // The set of nodes that are reachable from a given node.
   GraphNodeSet ReachableNodes(GraphNodeIndex src) const;
@@ -322,10 +346,10 @@ class SubGraph {
   const ConstraintSet* constraints() const { return constraints_; }
 
  private:
-  void PathsRecursive(Delay max_distance, size_t max_hops, GraphNodeIndex at,
+  void PathsRecursive(const DFSConfig& dfs_config, GraphNodeIndex at,
                       GraphNodeIndex dst, PathCallback path_callback,
                       GraphLinkSet* links_seen, GraphNodeSet* nodes_seen,
-                      Links* current, Delay* total_distance, bool simple) const;
+                      Links* current, Delay* total_distance) const;
 
   void ReachableNodesRecursive(GraphNodeIndex at,
                                GraphNodeSet* nodes_seen) const;
@@ -336,6 +360,63 @@ class SubGraph {
   // Nodes/links to exclude.
   const ConstraintSet* constraints_;
 };
+
+// A directed graph and multiple sets of constraints, connected by a logical OR
+// class DisjointSubGraph {
+// public:
+//  DisjointSubGraph(const DirectedGraph* parent,
+//                   const std::vector<const ConstraintSet*>& constraints) {
+//    CHECK(!constraints.empty());
+//    for (const ConstraintSet* constraint_set : constraints) {
+//      sub_graphs_.emplace_back(parent, constraint_set);
+//    }
+//  }
+//
+//  // Returns all paths between a source and a destination, sorted in order
+//  // of increasing delay. This function does not allow a callback to be called
+//  // with each path because the sets of paths returned by each subgraph's DFS
+//  // may overlap---need to store them and make sure they are unique.
+//  std::set<LinkSequence> Paths(GraphNodeIndex src, GraphNodeIndex dst,
+//                               const DFSConfig& dfs_config) const {
+//    std::set<LinkSequence> all_paths;
+//    for (const auto& sub_graph : sub_graphs_) {
+//      sub_graph.Paths(src, dst, [&all_paths](const LinkSequence& links) {
+//        all_paths.emplace(links);
+//      }, dfs_config);
+//    }
+//
+//    return all_paths;
+//  }
+//
+//  // The set of nodes that are reachable from a given node.
+//  GraphNodeSet ReachableNodes(GraphNodeIndex src) const {
+//    GraphNodeSet out;
+//    for (const auto& sub_graph : sub_graphs_) {
+//      out.InsertAll(sub_graph.ReachableNodes(src));
+//    }
+//
+//    return out;
+//  }
+//
+//  // The shortest path between two nodes.
+//  LinkSequence ShortestPath(GraphNodeIndex src, GraphNodeIndex dst) const {
+//    LinkSequence shortest;
+//    Delay shortest_delay = Delay::max();
+//
+//    for (const auto& sub_graph : sub_graphs_) {
+//      LinkSequence sub_graph_sp = sub_graph.ShortestPath(src, dst);
+//      if (sub_graph_sp.delay() < shortest_delay) {
+//        shortest = sub_graph_sp;
+//        shortest_delay = sub_graph_sp.delay();
+//      }
+//    }
+//
+//    return shortest;
+//  }
+//
+// private:
+//  std::vector<SubGraph> sub_graphs_;
+//};
 
 struct SubGraphShortestPathState {
   void Clear() {
@@ -467,6 +548,53 @@ class KShortestPathsGenerator {
   // State for the SP calls.
   SubGraphShortestPathState sp_state_;
 };
+
+// Like KShortestPathsGenerator above, but for a DisjointSubGraph.
+// class DisjointKShortestPathsGenerator {
+// public:
+//  // Returns the next shortest path, starting at the shortest.
+//  LinkSequence Next() {
+//    if (queue_.empty()) {
+//      return {};
+//    }
+//
+//    PathGenAndPath top = queue_.top();
+//    queue_.pop();
+//
+//    CHECK(!top.candidate.empty());
+//    LinkSequence to_return = std::move(top.candidate);
+//
+//    top.candidate = top.generator->NextPath();
+//    if (!top.candidate.empty()) {
+//      queue_.push(top);
+//    }
+//    return to_return;
+//  }
+//
+// private:
+//  struct PathGenAndPath {
+//    PathGenAndPath(KShortestPathsGenerator* generator, LinkSequence candidate)
+//        : generator(generator), candidate(candidate) {}
+//
+//    ShortestPathGenerator* generator;
+//    LinkSequence candidate;
+//  };
+//
+//  struct Comparator {
+//    bool operator()(const PathGenAndPath& lhs, const PathGenAndPath& rhs) {
+//      return lhs.candidate.delay() < rhs.candidate.delay();
+//    }
+//  };
+//
+//  // A priority queue that has as many elements as there are KSP generators.
+//  // When the next path is generated the minimum of the queue is taken and
+//  // another path is generated from the generator that generated the minimum.
+//  std::priority_queue<PathGenAndPath, std::vector<PathGenAndPath>, Comparator>
+//      queue_;
+//
+//  // The generators.
+//  std::vector<KShortestPathsGenerator> ksp_generators_;
+//};
 
 }  // namespace nc
 }  // namespace ncode
