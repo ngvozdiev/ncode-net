@@ -124,11 +124,11 @@ net::GraphNodeSet NodesInPath(const net::LinkSequence& path,
   return out;
 }
 
-void SinglePassSingleConstraint(const net::GraphStorage& storage,
-                                net::GraphNodeIndex src_node,
-                                net::GraphNodeIndex dst_node,
-                                size_t to_visit_size, size_t count,
-                                bool single) {
+milliseconds SinglePassSingleConstraint(const net::GraphStorage& storage,
+                                        net::GraphNodeIndex src_node,
+                                        net::GraphNodeIndex dst_node,
+                                        size_t to_visit_size, size_t count,
+                                        bool single) {
   net::DirectedGraph graph(&storage);
   net::ConstraintSet constraints;
 
@@ -162,22 +162,23 @@ void SinglePassSingleConstraint(const net::GraphStorage& storage,
                   {});
   std::sort(all_paths.begin(), all_paths.end());
 
-  std::string tag = Substitute("KSP $0 $1", to_visit_size, count);
-  TimeMs(tag, [src_node, dst_node, &sub_graph, &paths, count] {
-    net::KShortestPathsGenerator ksp(src_node, dst_node, &sub_graph);
-    for (size_t i = 0; i < count; ++i) {
-      net::LinkSequence p = ksp.KthShortestPath(i);
-      if (!p.empty()) {
-        paths.emplace_back(p);
-      }
+  auto start = high_resolution_clock::now();
+  net::KShortestPathsGenerator ksp(src_node, dst_node, &sub_graph);
+  for (size_t i = 0; i < count; ++i) {
+    net::LinkSequence p = ksp.KthShortestPath(i);
+    if (!p.empty()) {
+      paths.emplace_back(p);
     }
-  });
+  }
+  auto end = high_resolution_clock::now();
 
   size_t simple_paths = CountSimplePaths(paths, &storage);
   LOG(ERROR) << "KSP " << paths.size() << " simple " << simple_paths
              << " all paths " << all_paths.size();
   double delta = Compare(all_paths, paths, simple_paths, &storage);
   LOG(ERROR) << "delta " << delta;
+
+  return duration_cast<milliseconds>(end - start);
 }
 
 int main(int argc, char** argv) {
@@ -192,10 +193,24 @@ int main(int argc, char** argv) {
   net::GraphNodeIndex london_node = path_storage.NodeFromStringOrDie("london");
   net::GraphNodeIndex tokyo_node = path_storage.NodeFromStringOrDie("tokyo");
   size_t all_nodes_count = path_storage.AllNodes().Count();
-  size_t limit = all_nodes_count;
 
-  for (size_t i = 0; i < limit; ++i) {
-    SinglePassSingleConstraint(path_storage, london_node, tokyo_node, i,
-                               1000000, true);
+  size_t limit = all_nodes_count;
+  size_t max_count = 100000;
+
+  std::vector<double> times;
+  for (size_t i = 0; i < limit; i += 2) {
+    milliseconds ms = SinglePassSingleConstraint(
+        path_storage, london_node, tokyo_node, i, max_count, true);
+    times.emplace_back(ms.count());
   }
+  LOG(ERROR) << "[" << nc::Join(times, ",") << "]";
+
+  times.clear();
+  for (size_t i = 0; i < 10; ++i) {
+    size_t count = i * max_count / 10;
+    milliseconds ms = SinglePassSingleConstraint(
+        path_storage, london_node, tokyo_node, limit / 2, count, true);
+    times.emplace_back(ms.count());
+  }
+  LOG(ERROR) << "[" << nc::Join(times, ",") << "]";
 }
