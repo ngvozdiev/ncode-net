@@ -488,14 +488,16 @@ std::string LinkSequence::ToStringNoPorts(const GraphStorage* storage) const {
 }
 
 std::string LinkSequence::ToStringIdsOnly() const {
-  std::stringstream ss;
   if (links_.empty()) {
     return "[]";
   }
 
-  return StrCat("[", Join(links_, "->", [](GraphLinkIndex link) {
-                  return std::to_string(link);
-                }), "] ", delay_.count(), "μs");
+  std::vector<std::string> links_str;
+  for (GraphLinkIndex link : links_) {
+    links_str.emplace_back(std::to_string(link));
+  }
+
+  return StrCat("[", Join(links_str, "->"), "] ", delay_.count(), "μs");
 }
 
 GraphNodeIndex LinkSequence::FirstHop(const GraphStorage* storage) const {
