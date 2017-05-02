@@ -18,80 +18,15 @@
 namespace nc {
 namespace net {
 
-void AddEdgeToGraph(const std::string& src, const std::string& dst, Delay delay,
-                    Bandwidth bw, PBNet* graph) {
-  using namespace std::chrono;
-
-  CHECK(src != dst) << "Source same as destination: " << src;
-  CHECK(!src.empty() && !dst.empty()) << "Source or destination ID missing.";
-  PBGraphLink* edge = graph->add_links();
-  edge->set_src(src);
-  edge->set_dst(dst);
-  edge->set_delay_sec(duration<double>(delay).count());
-  edge->set_bandwidth_bps(bw.bps());
-
-  uint32_t port_num = graph->links_size();
-  edge->set_src_port(port_num);
-  edge->set_dst_port(port_num);
-}
-
-void AddBiEdgeToGraph(const std::string& src, const std::string& dst,
-                      Delay delay, Bandwidth bw, PBNet* graph) {
-  AddEdgeToGraph(src, dst, delay, bw, graph);
-  AddEdgeToGraph(dst, src, delay, bw, graph);
-}
-
-static void AddEdgesToGraphHelper(
-    const std::vector<std::pair<std::string, std::string>>& edges, Delay delay,
-    Bandwidth bw, bool bidirectional, PBNet* graph) {
-  for (const auto& src_and_dst : edges) {
-    const std::string& src = src_and_dst.first;
-    const std::string& dst = src_and_dst.second;
-    if (bidirectional) {
-      AddBiEdgeToGraph(src, dst, delay, bw, graph);
-    } else {
-      AddEdgeToGraph(src, dst, delay, bw, graph);
-    }
-  }
-}
-
-void AddEdgesToGraph(
-    const std::vector<std::pair<std::string, std::string>>& edges, Delay delay,
-    Bandwidth bw, PBNet* graph) {
-  AddEdgesToGraphHelper(edges, delay, bw, false, graph);
-}
-
-void AddBiEdgesToGraph(
-    const std::vector<std::pair<std::string, std::string>>& edges, Delay delay,
-    Bandwidth bw, PBNet* graph) {
-  AddEdgesToGraphHelper(edges, delay, bw, true, graph);
-}
-
 std::chrono::microseconds TotalDelayOfLinks(const Links& links,
-                                            const GraphStorage* graph_storage) {
+                                            const GraphStorage& graph_storage) {
   std::chrono::microseconds total(0);
   for (GraphLinkIndex link_index : links) {
-    const GraphLink* link = graph_storage->GetLink(link_index);
+    const GraphLink* link = graph_storage.GetLink(link_index);
     total += link->delay();
   }
 
   return total;
-}
-
-GraphStorage::GraphStorage(const PBNet& graph) : tag_generator_(0) {
-  empty_path_ = make_unique<GraphPath>(this);
-  for (const auto& link_pb : graph.links()) {
-    LinkFromProtobuf(link_pb);
-  }
-
-  for (const PBNetRegion& region : graph.regions()) {
-    GraphNodeSet nodes_in_region;
-    for (const std::string& node_id : region.nodes()) {
-      nodes_in_region.Insert(NodeFromStringOrDie(node_id));
-    }
-
-    regions_.emplace_back(nodes_in_region);
-  }
 }
 
 GraphLinkIndex GraphStorage::FindUniqueInverseOrDie(
@@ -220,10 +155,13 @@ std::unique_ptr<GraphStorage> GraphStorage::ClusterNodes(
         new_storage->NodeFromString(dst_cluster_name);
 
     net::DevicePortNumber port(++port_num);
-    auto link_ptr = std::unique_ptr<GraphLink>(new GraphLink(
-        src_cluster_index, dst_cluster_index, port, port, link->bandwidth(),
-        link->delay(), new_storage->GetNode(src_cluster_index),
-        new_storage->GetNode(dst_cluster_index)));
+
+    GraphLinkBase new_link_base(src_cluster_name, dst_cluster_name, port, port,
+                                link->bandwidth(), link->delay());
+    auto link_ptr = std::unique_ptr<GraphLink>(
+        new GraphLink(new_link_base, src_cluster_index, dst_cluster_index,
+                      new_storage->GetNode(src_cluster_index),
+                      new_storage->GetNode(dst_cluster_index)));
     GraphLinkIndex clustered_link_index =
         new_storage->link_store_.MoveItem(std::move(link_ptr));
     real_to_clustered_links->Add(link_index, clustered_link_index);
@@ -232,62 +170,6 @@ std::unique_ptr<GraphStorage> GraphStorage::ClusterNodes(
   }
 
   return new_storage;
-}
-
-bool GraphStorage::LinkFromProtobuf(const PBGraphLink& link_pb,
-                                    GraphLinkIndex* index) const {
-  // First try to find the link by the src and dst.
-  CHECK(!link_pb.src().empty() && !link_pb.dst().empty())
-      << "Link source or destination missing";
-  CHECK(link_pb.src() != link_pb.dst()) << "Link source same as destination: "
-                                        << link_pb.src();
-  auto it_one = links_.find(link_pb.src());
-  if (it_one != links_.end()) {
-    auto it_two = it_one->second.find(link_pb.dst());
-    if (it_two != it_one->second.end()) {
-      if (link_pb.src_port() == 0 && link_pb.dst_port() == 0) {
-        *index = it_two->second.front();
-        return true;
-      }
-
-      // There are one or many links with the same src and dst addresses.
-      const GraphLink* other_with_same_src_port = nullptr;
-      const GraphLink* other_with_same_dst_port = nullptr;
-      GraphLinkIndex other_with_same_src_port_index;
-      for (GraphLinkIndex link_index : it_two->second) {
-        const GraphLink* link_ptr = GetLink(link_index);
-
-        if (link_pb.src_port() != 0 &&
-            link_ptr->src_port().Raw() == link_pb.src_port()) {
-          CHECK(other_with_same_src_port == nullptr);
-          other_with_same_src_port = link_ptr;
-          other_with_same_src_port_index = link_index;
-        }
-
-        if (link_pb.dst_port() != 0 &&
-            link_ptr->dst_port().Raw() == link_pb.dst_port()) {
-          CHECK(other_with_same_dst_port == nullptr);
-          other_with_same_dst_port = link_ptr;
-        }
-      }
-
-      CHECK(other_with_same_src_port == other_with_same_dst_port)
-          << other_with_same_src_port << " != " << other_with_same_dst_port;
-      if (other_with_same_src_port != nullptr) {
-        *index = other_with_same_src_port_index;
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-GraphLinkIndex GraphStorage::LinkFromProtobufOrDie(
-    const PBGraphLink& link_pb) const {
-  GraphLinkIndex out;
-  CHECK(LinkFromProtobuf(link_pb, &out));
-  return out;
 }
 
 GraphLinkIndex GraphStorage::LinkOrDie(const std::string& src,
@@ -306,36 +188,19 @@ GraphLinkIndex GraphStorage::LinkOrDie(const std::string& src,
   return GraphLinkIndex(0);
 }
 
-GraphLinkIndex GraphStorage::LinkFromProtobuf(const PBGraphLink& link_pb) {
-  GraphLinkIndex out;
-  if (LinkFromProtobuf(link_pb, &out)) {
-    return out;
+GraphStorage::GraphStorage(const GraphBuilder& graph_builder) {
+  for (const auto& link_base : graph_builder.links()) {
+    const std::string& src_id = link_base.src_id();
+    const std::string& dst_id = link_base.dst_id();
+
+    auto src_index = NodeFromString(src_id);
+    auto dst_index = NodeFromString(dst_id);
+    auto link_ptr = std::unique_ptr<GraphLink>(
+        new GraphLink(link_base, src_index, dst_index, GetNode(src_index),
+                      GetNode(dst_index)));
+    GraphLinkIndex index = link_store_.MoveItem(std::move(link_ptr));
+    links_[src_id][dst_id].emplace_back(index);
   }
-
-  // Unable to find a link, need to create new one. At this point the protobuf
-  // needs to have the ports set.
-  CHECK(link_pb.src_port() != 0 && link_pb.dst_port() != 0)
-      << "Source or destination port missing for new link from "
-      << link_pb.src() << " to " << link_pb.dst();
-
-  auto src_index = NodeFromString(link_pb.src());
-  auto dst_index = NodeFromString(link_pb.dst());
-  auto link_ptr = std::unique_ptr<GraphLink>(new GraphLink(
-      link_pb, src_index, dst_index, GetNode(src_index), GetNode(dst_index)));
-  GraphLinkIndex index = link_store_.MoveItem(std::move(link_ptr));
-  links_[link_pb.src()][link_pb.dst()].emplace_back(index);
-  return index;
-}
-
-const GraphLink* GraphStorage::LinkPtrFromProtobufOrDie(
-    const PBGraphLink& link_pb) const {
-  GraphLinkIndex link_index = LinkFromProtobufOrDie(link_pb);
-  return GetLink(link_index);
-}
-
-const GraphLink* GraphStorage::LinkPtrFromProtobuf(const PBGraphLink& link_pb) {
-  GraphLinkIndex link_index = LinkFromProtobuf(link_pb);
-  return GetLink(link_index);
 }
 
 bool HasDuplicateLinks(const Links& links) {
@@ -345,6 +210,25 @@ bool HasDuplicateLinks(const Links& links) {
         return true;
       }
     }
+  }
+
+  return false;
+}
+
+bool HasDuplicateNodes(const Links& links, const GraphStorage& graph_storage) {
+  if (links.empty()) {
+    return false;
+  }
+
+  GraphNodeSet nodes;
+  GraphNodeIndex src_of_path = graph_storage.GetLink(links[0])->src();
+  nodes.Insert(src_of_path);
+  for (size_t i = 0; i < links.size(); ++i) {
+    GraphNodeIndex dst = graph_storage.GetLink(links[i])->dst();
+    if (nodes.Contains(dst)) {
+      return true;
+    }
+    nodes.Insert(dst);
   }
 
   return false;
@@ -385,44 +269,36 @@ std::pair<size_t, size_t> LinksDetour(const Links& path_one,
 }
 
 std::string GraphNodeSetToString(const GraphNodeSet& nodes,
-                                 const GraphStorage* graph_storage) {
+                                 const GraphStorage& graph_storage) {
   std::vector<std::string> node_names;
   for (GraphNodeIndex node_index : nodes) {
-    node_names.emplace_back(graph_storage->GetNode(node_index)->id());
+    node_names.emplace_back(graph_storage.GetNode(node_index)->id());
   }
   return StrCat("{", Join(node_names, ","), "}");
 }
 
 std::string GraphLinkSetToString(const GraphLinkSet& links,
-                                 const GraphStorage* graph_storage) {
+                                 const GraphStorage& graph_storage) {
   std::vector<std::string> link_names;
   for (GraphLinkIndex link_index : links) {
     link_names.emplace_back(
-        graph_storage->GetLink(link_index)->ToStringNoPorts());
+        graph_storage.GetLink(link_index)->ToStringNoPorts());
   }
   return StrCat("{", Join(link_names, ","), "}");
 }
 
-LinkSequence::LinkSequence() : delay_(Delay::zero()) {}
+Walk::Walk() : delay_(Delay::zero()) {}
 
-LinkSequence::LinkSequence(const Links& links, Delay delay,
-                           bool check_for_duplicates)
-    : links_(links), delay_(delay) {
-  if (check_for_duplicates) {
-    CHECK(!HasDuplicateLinks(links)) << "Duplicate link";
-  }
-}
+Walk::Walk(const Links& links, Delay delay) : links_(links), delay_(delay) {}
 
-LinkSequence::LinkSequence(const Links& links, const GraphStorage* storage,
-                           bool check_for_duplicates)
-    : LinkSequence(links, TotalDelayOfLinks(links, storage),
-                   check_for_duplicates) {}
+Walk::Walk(const Links& links, const GraphStorage& storage)
+    : Walk(links, TotalDelayOfLinks(links, storage)) {}
 
-bool LinkSequence::Contains(GraphLinkIndex link) const {
+bool Walk::Contains(GraphLinkIndex link) const {
   return std::find(links_.begin(), links_.end(), link) != links_.end();
 }
 
-bool LinkSequence::ContainsAny(GraphLinkSet links) const {
+bool Walk::ContainsAny(GraphLinkSet links) const {
   for (GraphLinkIndex link_index : links_) {
     if (links.Contains(link_index)) {
       return true;
@@ -432,31 +308,18 @@ bool LinkSequence::ContainsAny(GraphLinkSet links) const {
   return false;
 }
 
-bool LinkSequence::HasDuplicateNodes(const GraphStorage* graph_storage) const {
-  if (links_.empty()) {
-    return false;
-  }
+bool Walk::IsTrail() const { return !HasDuplicateLinks(links_); }
 
-  GraphNodeSet nodes;
-  GraphNodeIndex src_of_path = graph_storage->GetLink(links_[0])->src();
-  nodes.Insert(src_of_path);
-  for (size_t i = 0; i < links_.size(); ++i) {
-    GraphNodeIndex dst = graph_storage->GetLink(links_[i])->dst();
-    if (nodes.Contains(dst)) {
-      return true;
-    }
-    nodes.Insert(dst);
-  }
-
-  return false;
+bool Walk::IsPath(const GraphStorage& graph_storage) const {
+  return !HasDuplicateNodes(links_, graph_storage);
 }
 
-std::string LinkSequence::ToString(const GraphStorage* storage) const {
+std::string Walk::ToString(const GraphStorage& storage) const {
   std::stringstream ss;
   ss << "[";
 
   for (const auto& edge : links_) {
-    const GraphLink* link = storage->GetLink(edge);
+    const GraphLink* link = storage.GetLink(edge);
     ss << link->ToString();
 
     if (edge != links_.back()) {
@@ -468,7 +331,7 @@ std::string LinkSequence::ToString(const GraphStorage* storage) const {
   return ss.str();
 }
 
-std::string LinkSequence::ToStringNoPorts(const GraphStorage* storage) const {
+std::string Walk::ToStringNoPorts(const GraphStorage& storage) const {
   std::stringstream ss;
   if (links_.empty()) {
     return "[]";
@@ -476,49 +339,55 @@ std::string LinkSequence::ToStringNoPorts(const GraphStorage* storage) const {
 
   ss << "[";
   for (const auto& edge : links_) {
-    const GraphLink* link = storage->GetLink(edge);
+    const GraphLink* link = storage.GetLink(edge);
     ss << link->src_node()->id() << "->";
   }
 
-  const GraphLink* link = storage->GetLink(links_.back());
+  const GraphLink* link = storage.GetLink(links_.back());
   ss << link->dst_node()->id();
   ss << "] ";
   ss << StrCat(delay_.count(), "μs");
   return ss.str();
 }
 
-std::string LinkSequence::ToStringIdsOnly() const {
+std::string Walk::ToStringIdsOnly(const GraphStorage& storage) const {
+  std::stringstream ss;
   if (links_.empty()) {
     return "[]";
   }
 
-  std::vector<std::string> links_str;
-  for (GraphLinkIndex link : links_) {
-    links_str.emplace_back(std::to_string(link));
+  ss << "[";
+  for (const auto& edge : links_) {
+    const GraphLink* link = storage.GetLink(edge);
+    ss << link->src() << "->";
   }
 
-  return StrCat("[", Join(links_str, "->"), "] ", delay_.count(), "μs");
+  const GraphLink* link = storage.GetLink(links_.back());
+  ss << link->dst();
+  ss << "] ";
+  ss << StrCat(delay_.count(), "μs");
+  return ss.str();
 }
 
-GraphNodeIndex LinkSequence::FirstHop(const GraphStorage* storage) const {
+GraphNodeIndex Walk::FirstHop(const GraphStorage& storage) const {
   DCHECK(!links_.empty());
   GraphLinkIndex first_link = links_.front();
-  return storage->GetLink(first_link)->src();
+  return storage.GetLink(first_link)->src();
 }
 
-GraphNodeIndex LinkSequence::LastHop(const GraphStorage* storage) const {
+GraphNodeIndex Walk::LastHop(const GraphStorage& storage) const {
   DCHECK(!links_.empty());
   GraphLinkIndex last_link = links_.back();
-  return storage->GetLink(last_link)->dst();
+  return storage.GetLink(last_link)->dst();
 }
 
-size_t LinkSequence::InMemBytesEstimate() const {
+size_t Walk::InMemBytesEstimate() const {
   return links_.capacity() * sizeof(Links::value_type) + sizeof(*this);
 }
 
-Delay LinkSequence::delay() const { return delay_; }
+Delay Walk::delay() const { return delay_; }
 
-bool operator<(const LinkSequence& lhs, const LinkSequence& rhs) {
+bool operator<(const Walk& lhs, const Walk& rhs) {
   net::Delay lhs_delay = lhs.delay();
   net::Delay rhs_delay = rhs.delay();
   if (lhs_delay != rhs_delay) {
@@ -528,40 +397,25 @@ bool operator<(const LinkSequence& lhs, const LinkSequence& rhs) {
   return lhs.links() < rhs.links();
 }
 
-bool operator==(const LinkSequence& lhs, const LinkSequence& rhs) {
+bool operator>(const Walk& lhs, const Walk& rhs) {
+  net::Delay lhs_delay = lhs.delay();
+  net::Delay rhs_delay = rhs.delay();
+  if (lhs_delay != rhs_delay) {
+    return lhs_delay > rhs_delay;
+  }
+
+  return lhs.links() > rhs.links();
+}
+
+bool operator==(const Walk& lhs, const Walk& rhs) {
   return lhs.links_ == rhs.links_;
 }
 
-bool operator!=(const LinkSequence& lhs, const LinkSequence& rhs) {
+bool operator!=(const Walk& lhs, const Walk& rhs) {
   return lhs.links_ != rhs.links_;
 }
 
-std::string GraphPath::ToString() const {
-  return link_sequence_.ToString(storage_);
-}
-
-std::string GraphPath::ToStringNoPorts() const {
-  using namespace std::chrono;
-  double delay_ms = duration<double, milliseconds::period>(delay()).count();
-  return Substitute("$0 $1ms", link_sequence_.ToStringNoPorts(storage_),
-                    delay_ms);
-}
-
-GraphNodeIndex GraphPath::FirstHop() const {
-  return link_sequence_.FirstHop(storage_);
-}
-
-GraphNodeIndex GraphPath::LastHop() const {
-  return link_sequence_.LastHop(storage_);
-}
-
-void GraphPath::Populate(LinkSequence link_sequence, uint32_t tag) {
-  link_sequence_ = link_sequence;
-  tag_ = tag;
-}
-
-LinkSequence GraphStorage::LinkSequenceFromStringOrDie(
-    const std::string& path_string) const {
+Walk GraphStorage::WalkFromStringOrDie(const std::string& path_string) const {
   CHECK(path_string.length() > 1) << "Path string malformed: " << path_string;
   CHECK(path_string.front() == '[' && path_string.back() == ']')
       << "Path string malformed: " << path_string;
@@ -583,131 +437,18 @@ LinkSequence GraphStorage::LinkSequenceFromStringOrDie(
     std::string dst = src_and_dst[1];
     CHECK(src.size() > 0 && dst.size() > 0) << "Path string malformed: "
                                             << path_string;
-
-    net::PBGraphLink link_pb;
-    link_pb.set_src(src);
-    link_pb.set_dst(dst);
-
-    links.push_back(LinkFromProtobufOrDie(link_pb));
+    links.push_back(LinkOrDie(src, dst));
   }
 
-  return {links, TotalDelayOfLinks(links, this)};
+  return {links, TotalDelayOfLinks(links, *this)};
 }
 
-const GraphPath* GraphStorage::PathFromStringOrDie(
-    const std::string& path_string, uint64_t cookie) {
-  LinkSequence link_sequence = LinkSequenceFromStringOrDie(path_string);
-  return PathFromLinksOrDie(link_sequence, cookie);
-}
+bool GraphStorage::IsInWalks(const std::string& needle,
+                             const std::vector<Walk>& haystack) const {
+  Walk walk = WalkFromStringOrDie(needle);
 
-const GraphPath* GraphStorage::PathFromLinksOrDie(
-    const LinkSequence& link_sequence, uint64_t cookie) {
-  if (link_sequence.empty()) {
-    return empty_path_.get();
-  }
-
-  const GraphPath* return_path;
-  std::map<Links, GraphPath>& path_map = cookie_to_paths_[cookie];
-  auto iterator_and_added = path_map.emplace(
-      std::piecewise_construct, std::forward_as_tuple(link_sequence.links()),
-      std::forward_as_tuple(this));
-  if (iterator_and_added.second) {
-    auto& it = iterator_and_added.first;
-    it->second.Populate(link_sequence, ++tag_generator_);
-    return_path = &(it->second);
-  } else {
-    auto& it = iterator_and_added.first;
-    return_path = &(it->second);
-  }
-
-  return return_path;
-}
-
-const GraphPath* GraphStorage::PathFromProtobufOrDie(
-    const google::protobuf::RepeatedPtrField<PBGraphLink>& links_pb,
-    uint64_t cookie) {
-  Links links;
-  const std::string* old_dst = nullptr;
-  for (const auto& link_pb : links_pb) {
-    links.push_back(LinkFromProtobufOrDie(link_pb));
-
-    const std::string& src = link_pb.src();
-    const std::string& dst = link_pb.dst();
-
-    CHECK(old_dst == nullptr || *old_dst == src) << "Path not contiguous";
-    old_dst = &dst;
-  }
-
-  return PathFromLinksOrDie({links, TotalDelayOfLinks(links, this)}, cookie);
-}
-
-const GraphPath* GraphStorage::PathFromProtobufOrDie(
-    const std::vector<PBGraphLink>& links, uint64_t cookie) {
-  google::protobuf::RepeatedPtrField<PBGraphLink> links_pb;
-  for (const auto& link : links) {
-    *links_pb.Add() = link;
-  }
-
-  return PathFromProtobufOrDie(links_pb, cookie);
-}
-
-std::string GraphStorage::DumpPaths() const {
-  using namespace std::chrono;
-
-  static std::stringstream out;
-  for (const auto& cookie_and_path_map : cookie_to_paths_) {
-    const std::map<Links, GraphPath>& links_to_path =
-        cookie_and_path_map.second;
-
-    for (const auto& links_and_path : links_to_path) {
-      const GraphPath& path = links_and_path.second;
-      double delay_ms =
-          duration<double, milliseconds::period>(path.delay()).count();
-      out << Substitute("$0|$1|$2|$3\n", path.ToStringNoPorts(), path.tag(),
-                        cookie_and_path_map.first, delay_ms);
-    }
-  }
-
-  return out.str();
-}
-
-const GraphPath* GraphStorage::FindPathByTagOrNull(uint32_t tag) const {
-  for (const auto& cookie_and_path_map : cookie_to_paths_) {
-    const std::map<Links, GraphPath>& links_to_path =
-        cookie_and_path_map.second;
-
-    for (const auto& links_and_path : links_to_path) {
-      const GraphPath& path = links_and_path.second;
-      if (path.tag() == tag) {
-        return &path;
-      }
-    }
-  }
-
-  return nullptr;
-}
-
-bool IsInPaths(const std::string& needle,
-               const std::vector<LinkSequence>& haystack,
-               GraphStorage* storage) {
-  const GraphPath* path = storage->PathFromStringOrDie(needle, 0);
-
-  for (const LinkSequence& path_in_haystack : haystack) {
-    if (path_in_haystack.links() == path->link_sequence().links()) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-bool IsInPaths(const std::string& needle,
-               const std::vector<const GraphPath*>& haystack, uint64_t cookie,
-               GraphStorage* storage) {
-  const GraphPath* path = storage->PathFromStringOrDie(needle, cookie);
-
-  for (const GraphPath* path_in_haystack : haystack) {
-    if (path_in_haystack == path) {
+  for (const Walk& path_in_haystack : haystack) {
+    if (path_in_haystack.links() == walk.links()) {
       return true;
     }
   }
@@ -806,219 +547,39 @@ void IPRange::Init(IPAddress address, uint8_t mask_len) {
   base_address_ = MaskAddress(address, mask_len);
 }
 
-// Returns the index of the cluster a node belongs to.
-static size_t IndexOfRegionOrDie(const PBNet& graph, const std::string& node) {
-  size_t region_index = std::numeric_limits<size_t>::max();
-  for (int i = 0; i < graph.regions_size(); ++i) {
-    for (const std::string& cluster_node : graph.regions(i).nodes()) {
-      if (cluster_node == node) {
-        region_index = i;
-      }
-    }
-  }
-
-  CHECK(region_index != std::numeric_limits<size_t>::max())
-      << "Node not in any region: " << node;
-  return region_index;
+std::string GraphLinkBase::ToString() const {
+  return Substitute("$0:$1->$2:$3", src_id_, src_port_.Raw(), dst_id_,
+                    dst_port_.Raw());
 }
 
-size_t GraphStorage::IndexOfRegionOrDie(GraphNodeIndex node) const {
-  for (size_t i = 0; i < regions_.size(); ++i) {
-    const GraphNodeSet& nodes_in_region = regions_[i];
-
-    if (nodes_in_region.Contains(node)) {
-      return i;
-    }
-  }
-
-  LOG(FATAL) << "Node not in any region: " << node;
-  return 0;
+std::string GraphLinkBase::ToStringNoPorts() const {
+  return Substitute("$0->$1", src_id_, dst_id_);
 }
 
-std::set<std::string> NodesInSameRegionOrDie(const PBNet& graph,
-                                             const std::string& node) {
-  size_t region_index = IndexOfRegionOrDie(graph, node);
+void GraphBuilder::AddLink(const GraphLinkBase& link) {
+  CHECK(!link.src_id().empty()) << "missing src id";
+  CHECK(!link.dst_id().empty()) << "missing dst id";
+  CHECK(link.src_id() != link.dst_id()) << "src id same as dst id";
 
-  std::set<std::string> return_set;
-  for (const std::string& cluster_node : graph.regions(region_index).nodes()) {
-    if (cluster_node != node) {
-      return_set.emplace(cluster_node);
-    }
+  if (!auto_port_numbers_) {
+    CHECK(link.src_port() != DevicePortNumber::Zero());
+    CHECK(link.dst_port() != DevicePortNumber::Zero());
+    links_.emplace_back(link);
+    return;
   }
 
-  return return_set;
+  CHECK(link.src_port() == DevicePortNumber::Zero());
+  CHECK(link.dst_port() == DevicePortNumber::Zero());
+
+  DevicePortNumber port_num(links_.size() + 1);
+  links_.emplace_back(link.src_id(), link.dst_id(), port_num, port_num,
+                      link.bandwidth(), link.delay());
 }
 
-GraphNodeSet GraphStorage::NodesInSameRegionOrDie(GraphNodeIndex node) const {
-  size_t region_index = IndexOfRegionOrDie(node);
-  GraphNodeSet to_return = regions_[region_index];
-  to_return.Remove(node);
-  return to_return;
-}
-
-std::set<std::string> NodesInOtherRegionsOrDie(const PBNet& graph,
-                                               const std::string& node) {
-  int region_index = IndexOfRegionOrDie(graph, node);
-
-  std::set<std::string> return_set;
-  for (int i = 0; i < graph.regions_size(); ++i) {
-    if (i != region_index) {
-      const auto& nodes_in_cluster = graph.regions(i).nodes();
-      return_set.insert(nodes_in_cluster.begin(), nodes_in_cluster.end());
-    }
-  }
-
-  return return_set;
-}
-
-GraphNodeSet GraphStorage::NodesInOtherRegionsOrDie(GraphNodeIndex node) const {
-  size_t region_index = IndexOfRegionOrDie(node);
-  GraphNodeSet to_return;
-  for (size_t i = 0; i < regions_.size(); ++i) {
-    if (i != region_index) {
-      to_return.InsertAll(regions_[i]);
-    }
-  }
-
-  return to_return;
-}
-
-bool IsNodeInGraph(const PBNet& graph, const std::string& node) {
-  for (const auto& link : graph.links()) {
-    if (link.src() == node || link.dst() == node) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-bool IsIntraClusterLink(const PBNet& graph, const PBGraphLink& link) {
-  const std::string& src = link.src();
-  std::set<std::string> in_same_cluster = NodesInSameRegionOrDie(graph, src);
-  return ContainsKey(in_same_cluster, link.dst());
-}
-
-GraphLink::GraphLink(const net::PBGraphLink& link_pb, GraphNodeIndex src,
-                     GraphNodeIndex dst, const GraphNode* src_node,
-                     const GraphNode* dst_node)
-    : src_(src),
-      dst_(dst),
-      src_port_(link_pb.src_port()),
-      dst_port_(link_pb.dst_port()),
-      bandwidth_(Bandwidth::FromBitsPerSecond(link_pb.bandwidth_bps())),
-      src_node_(src_node),
-      dst_node_(dst_node) {
-  using namespace std::chrono;
-  CHECK(link_pb.delay_sec() != 0) << "Link has zero delay";
-  CHECK(link_pb.bandwidth_bps() != 0) << "Link has zero bandwidth";
-  duration<double> duration(link_pb.delay_sec());
-  delay_ = duration_cast<Delay>(duration);
-}
-
-GraphLink::GraphLink(GraphNodeIndex src, GraphNodeIndex dst,
-                     DevicePortNumber src_port, DevicePortNumber dst_port,
-                     Bandwidth bw, Delay delay, const GraphNode* src_node,
-                     const GraphNode* dst_node)
-    : src_(src),
-      dst_(dst),
-      src_port_(src_port),
-      dst_port_(dst_port),
-      bandwidth_(bw),
-      delay_(delay),
-      src_node_(src_node),
-      dst_node_(dst_node) {}
-
-std::string GraphLink::ToString() const {
-  return Substitute("$0:$1->$2:$3", src_node_->id(), src_port_.Raw(),
-                    dst_node_->id(), dst_port_.Raw());
-}
-
-std::string GraphLink::ToStringNoPorts() const {
-  return Substitute("$0->$1", src_node_->id(), dst_node_->id());
-}
-
-PBGraphLink GraphLink::ToProtobuf() const {
-  PBGraphLink out_pb;
-  out_pb.set_src(src_node_->id());
-  out_pb.set_dst(dst_node_->id());
-  out_pb.set_src_port(src_port_.Raw());
-  out_pb.set_dst_port(dst_port_.Raw());
-  out_pb.set_bandwidth_bps(bandwidth_.bps());
-
-  double delay_sec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(delay_).count();
-  out_pb.set_delay_sec(delay_sec);
-  return out_pb;
-}
-
-PBGraphLink* FindEdgeOrDie(const std::string& src, const std::string& dst,
-                           PBNet* net) {
-  for (PBGraphLink& link : *net->mutable_links()) {
-    if (link.src() == src && link.dst() == dst) {
-      return &link;
-    }
-  }
-
-  LOG(FATAL) << "No edge from " << src << " to " << dst;
-  return nullptr;
-}
-
-bool IsPartitioned(const PBNet& graph) {
-  std::map<std::string, size_t> node_to_index;
-  size_t i = 0;
-  for (const auto& link : graph.links()) {
-    if (!ContainsKey(node_to_index, link.src())) {
-      node_to_index[link.src()] = i++;
-    }
-
-    if (!ContainsKey(node_to_index, link.dst())) {
-      node_to_index[link.dst()] = i++;
-    }
-  }
-
-  const size_t inf = std::numeric_limits<size_t>::max();
-  size_t nodes = node_to_index.size();
-  std::vector<std::vector<size_t>> distances(nodes);
-  for (size_t i = 0; i < nodes; ++i) {
-    distances[i] = std::vector<size_t>(nodes, inf);
-  }
-
-  for (const auto& link : graph.links()) {
-    size_t src_index = node_to_index[link.src()];
-    size_t dst_index = node_to_index[link.dst()];
-    distances[src_index][dst_index] = 1;
-  }
-
-  for (size_t k = 0; k < nodes; ++k) {
-    distances[k][k] = 0;
-  }
-
-  for (size_t k = 0; k < nodes; ++k) {
-    for (size_t i = 0; i < nodes; ++i) {
-      for (size_t j = 0; j < nodes; ++j) {
-        size_t via_k = (distances[i][k] == inf || distances[k][j] == inf)
-                           ? inf
-                           : distances[i][k] + distances[k][j];
-
-        if (distances[i][j] > via_k) {
-          distances[i][j] = via_k;
-        }
-      }
-    }
-  }
-
-  // If the distances contain any std::numeric_limits<size_t>::max() then the
-  // network is partitioned.
-  for (size_t i = 0; i < nodes; ++i) {
-    for (size_t j = 0; j < nodes; ++j) {
-      if (distances[i][j] == inf) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+bool operator==(const GraphLinkBase& a, const GraphLinkBase& b) {
+  return std::tie(a.src_id_, a.dst_id_, a.src_port_, a.dst_port_, a.bandwidth_,
+                  a.delay_) == std::tie(b.src_id_, b.dst_id_, b.src_port_,
+                                        b.dst_port_, b.bandwidth_, b.delay_);
 }
 
 }  // namespace net

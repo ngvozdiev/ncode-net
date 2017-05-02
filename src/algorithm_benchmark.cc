@@ -1,7 +1,6 @@
 #include <chrono>
 #include <ncode/ncode_common/substitute.h>
 
-#include "net.pb.h"
 #include "algorithm.h"
 #include "net_common.h"
 #include "net_gen.h"
@@ -42,11 +41,11 @@ std::vector<net::GraphNodeSet> RandomSample(const net::GraphStorage& graph,
   return out;
 }
 
-size_t CountSimplePaths(const std::vector<net::LinkSequence>& paths,
-                        const net::GraphStorage* storage) {
+size_t CountSimplePaths(const std::vector<const net::Walk*>& paths,
+                        const net::GraphStorage& storage) {
   size_t i = 0;
   for (const auto& path : paths) {
-    if (!path.HasDuplicateNodes(storage)) {
+    if (path->IsPath(storage)) {
       ++i;
     }
   }
@@ -56,9 +55,9 @@ size_t CountSimplePaths(const std::vector<net::LinkSequence>& paths,
 
 // Compares two lists of paths and returns true if the first count simple paths
 // from both are the same.
-static double Compare(const std::vector<net::LinkSequence>& paths_one,
-                      const std::vector<net::LinkSequence>& paths_two,
-                      size_t count, const net::GraphStorage* storage) {
+static double Compare(const std::vector<net::Walk>& paths_one,
+                      const std::vector<const net::Walk*>& paths_two,
+                      size_t count, const net::GraphStorage& storage) {
   CHECK(paths_one.size() >= count);
   CHECK(paths_two.size() >= count);
   double total_delta = 0;
@@ -66,22 +65,22 @@ static double Compare(const std::vector<net::LinkSequence>& paths_one,
   size_t i_one = 0;
   size_t i_two = 0;
   for (size_t i = 0; i < count; ++i) {
-    const net::LinkSequence* ls_one;
+    const net::Walk* ls_one;
     while (true) {
       CHECK(paths_one.size() > i_one);
       ls_one = &paths_one[i_one++];
-      if (!ls_one->HasDuplicateNodes(storage)) {
+      if (ls_one->IsPath(storage)) {
         break;
       }
 
       //      LOG(ERROR) << "Skipping1 " << ls_one->ToStringNoPorts(storage);
     }
 
-    const net::LinkSequence* ls_two;
+    const net::Walk* ls_two;
     while (true) {
       CHECK(paths_two.size() > i_two);
-      ls_two = &paths_two[i_two++];
-      if (!ls_two->HasDuplicateNodes(storage)) {
+      ls_two = paths_two[i_two++];
+      if (ls_two->IsPath(storage)) {
         break;
       }
 
@@ -112,7 +111,7 @@ std::string SetToString(const net::GraphLinkSet& set) {
   return nc::Join(out, ",");
 }
 
-net::GraphNodeSet NodesInPath(const net::LinkSequence& path,
+net::GraphNodeSet NodesInPath(const net::Walk& path,
                               const net::GraphStorage* storage) {
   net::GraphNodeSet out;
   for (const auto& link : path.links()) {
@@ -149,33 +148,34 @@ milliseconds SinglePassSingleConstraint(const net::GraphStorage& storage,
     }
   }
 
-  LOG(ERROR) << constraints.ToString(&storage);
+  LOG(ERROR) << constraints.ToString(storage);
 
-  std::vector<net::LinkSequence> paths;
-  std::vector<net::LinkSequence> all_paths;
+  std::vector<const net::Walk*> paths;
+  std::vector<net::Walk> all_paths;
 
   net::SubGraph sub_graph(&graph, &constraints);
-  sub_graph.Paths(src_node, dst_node,
-                  [&all_paths, &storage](const net::LinkSequence& links) {
+  sub_graph.Paths(src_node,
+                  dst_node, [&all_paths, &storage](const net::Walk& links) {
                     all_paths.emplace_back(links);
-                  },
-                  {});
+                  }, {});
   std::sort(all_paths.begin(), all_paths.end());
 
   auto start = high_resolution_clock::now();
   net::KShortestPathsGenerator ksp(src_node, dst_node, &sub_graph);
   for (size_t i = 0; i < count; ++i) {
-    net::LinkSequence p = ksp.KthShortestPath(i);
-    if (!p.empty()) {
+    const net::Walk* p = ksp.KthShortestPath(i);
+    if (!p->empty()) {
       paths.emplace_back(p);
     }
   }
   auto end = high_resolution_clock::now();
 
-  size_t simple_paths = CountSimplePaths(paths, &storage);
+  LOG(ERROR) << ksp.GetStats().ToString();
+
+  size_t simple_paths = CountSimplePaths(paths, storage);
   LOG(ERROR) << "KSP " << paths.size() << " simple " << simple_paths
              << " all paths " << all_paths.size();
-  double delta = Compare(all_paths, paths, simple_paths, &storage);
+  double delta = Compare(all_paths, paths, simple_paths, storage);
   LOG(ERROR) << "delta " << delta;
 
   return duration_cast<milliseconds>(end - start);
@@ -185,8 +185,8 @@ int main(int argc, char** argv) {
   Unused(argc);
   Unused(argv);
 
-  net::PBNet net = net::GenerateNTT(net::Delay::zero(), 2.0);
-  net::GraphStorage path_storage(net);
+  net::GraphBuilder builder = net::GenerateNTT(net::Delay::zero(), 2.0);
+  net::GraphStorage path_storage(builder);
   LOG(ERROR) << "Graph with " << path_storage.NodeCount() << " nodes and "
              << path_storage.LinkCount() << " links";
 

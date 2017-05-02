@@ -30,7 +30,7 @@ class ExclusionSet {
 
   const GraphNodeSet& nodes_to_exclude() const { return nodes_to_exclude_; }
 
-  std::string ToString(const GraphStorage* storage) const {
+  std::string ToString(const GraphStorage& storage) const {
     return Substitute("exclude links: $0, exclude nodes: $1",
                       GraphLinkSetToString(links_to_exclude_, storage),
                       GraphNodeSetToString(nodes_to_exclude_, storage));
@@ -60,7 +60,7 @@ class ConstraintSet {
   // satisfy the constraints will return to_visit().size(). If the links do not
   // satisfy the constraints, or there are no visit constraints will return 0.
   // Assumes that the links form a path.
-  size_t MinVisit(const Links& links, const GraphStorage* graph_storage) const;
+  size_t MinVisit(const Links& links, const GraphStorage& graph_storage) const;
 
   bool ShouldExcludeLink(const GraphLinkIndex link) const {
     return exclusion_set_.ShouldExcludeLink(link);
@@ -107,7 +107,7 @@ class ConstraintSet {
     return to_return;
   }
 
-  std::string ToString(const GraphStorage* storage) const {
+  std::string ToString(const GraphStorage& storage) const {
     std::vector<std::string> visit_constraints;
     for (const auto& set_to_visit : to_visit_) {
       visit_constraints.emplace_back(
@@ -192,7 +192,7 @@ class ShortestPath {
   }
 
   // Returns the shortest path to the destination.
-  LinkSequence GetPath(GraphNodeIndex dst) const;
+  Walk GetPath(GraphNodeIndex dst) const;
 
   // Returns the distance from the source to a destination.
   Delay GetPathDistance(GraphNodeIndex dst) const;
@@ -257,7 +257,7 @@ class AllPairShortestPath {
   }
 
   // Returns the shortest path between src and dst.
-  LinkSequence GetPath(GraphNodeIndex src, GraphNodeIndex dst) const;
+  Walk GetPath(GraphNodeIndex src, GraphNodeIndex dst) const;
 
   // Returns the length of the shortest path between src and dst.
   Delay GetDistance(GraphNodeIndex src, GraphNodeIndex dst) const;
@@ -326,7 +326,7 @@ struct DFSConfig {
 // functionality.
 class SubGraph {
  public:
-  using PathCallback = std::function<void(const LinkSequence&)>;
+  using PathCallback = std::function<void(const Walk&)>;
 
   SubGraph(const DirectedGraph* parent, const ConstraintSet* constraints)
       : parent_(parent), constraints_(constraints) {}
@@ -339,7 +339,7 @@ class SubGraph {
   GraphNodeSet ReachableNodes(GraphNodeIndex src) const;
 
   // The shortest path between two nodes.
-  LinkSequence ShortestPath(GraphNodeIndex src, GraphNodeIndex dst) const;
+  Walk ShortestPath(GraphNodeIndex src, GraphNodeIndex dst) const;
 
   const DirectedGraph* parent() const { return parent_; }
 
@@ -376,11 +376,11 @@ class SubGraph {
 //  // of increasing delay. This function does not allow a callback to be called
 //  // with each path because the sets of paths returned by each subgraph's DFS
 //  // may overlap---need to store them and make sure they are unique.
-//  std::set<LinkSequence> Paths(GraphNodeIndex src, GraphNodeIndex dst,
+//  std::set<Walk> Paths(GraphNodeIndex src, GraphNodeIndex dst,
 //                               const DFSConfig& dfs_config) const {
-//    std::set<LinkSequence> all_paths;
+//    std::set<Walk> all_paths;
 //    for (const auto& sub_graph : sub_graphs_) {
-//      sub_graph.Paths(src, dst, [&all_paths](const LinkSequence& links) {
+//      sub_graph.Paths(src, dst, [&all_paths](const Walk& links) {
 //        all_paths.emplace(links);
 //      }, dfs_config);
 //    }
@@ -399,12 +399,12 @@ class SubGraph {
 //  }
 //
 //  // The shortest path between two nodes.
-//  LinkSequence ShortestPath(GraphNodeIndex src, GraphNodeIndex dst) const {
-//    LinkSequence shortest;
+//  Walk ShortestPath(GraphNodeIndex src, GraphNodeIndex dst) const {
+//    Walk shortest;
 //    Delay shortest_delay = Delay::max();
 //
 //    for (const auto& sub_graph : sub_graphs_) {
-//      LinkSequence sub_graph_sp = sub_graph.ShortestPath(src, dst);
+//      Walk sub_graph_sp = sub_graph.ShortestPath(src, dst);
 //      if (sub_graph_sp.delay() < shortest_delay) {
 //        shortest = sub_graph_sp;
 //        shortest_delay = sub_graph_sp.delay();
@@ -460,11 +460,23 @@ struct KShortestPathGeneratorStats {
   // the candidates, and the trie.
   size_t total_size_bytes = 0;
 
+  // Delay of k=0
+  Delay min_path_delay = Delay::zero();
+
+  // Delay of kth path.
+  Delay max_path_delay = Delay::zero();
+
+  // Delay of the longest candidate path. The candidate paths are *not*
+  // exhaustive.
+  Delay max_candidate_path_delay = Delay::zero();
+
   std::string ToString() {
     return Substitute(
-        "k: $0 ($1 bytes), trie: $2, candidates: $3, total: $4 bytes", k,
-        paths_size_bytes, trie_stats.ToString(), candidate_count,
-        total_size_bytes);
+        "k: $0 ($1 bytes), trie: $2, candidates: $3, total: $4 bytes, k=0 "
+        "delay: $5μs, k=k delay: $6μs, max candidate delay: $7μs",
+        k, paths_size_bytes, trie_stats.ToString(), candidate_count,
+        total_size_bytes, min_path_delay.count(), max_path_delay.count(),
+        max_candidate_path_delay.count());
   }
 };
 
@@ -478,42 +490,28 @@ class KShortestPathsGenerator {
         constraints_(sub_graph->constraints()->SanitizeConstraints(src, dst)),
         graph_(sub_graph->parent()) {}
 
-  // Returns the Kth shortest path.
-  LinkSequence KthShortestPath(size_t k);
+  // Returns the Kth shortest path. The path is owned by this object.
+  const Walk* KthShortestPath(size_t k);
 
-  KShortestPathGeneratorStats GetStats() const {
-    KShortestPathGeneratorStats stats;
-    stats.k = k_paths_.size();
-    stats.paths_size_bytes = PathContainerSize(k_paths_);
-
-    stats.trie_stats = k_paths_trie_.GetStats();
-    stats.candidate_count = candidates_.size();
-
-    size_t candidate_overhead = PathContainerSize(candidates_.containter());
-    stats.total_size_bytes = sizeof(*this) + stats.paths_size_bytes +
-                             stats.trie_stats.size_bytes + candidate_overhead;
-
-    return stats;
-  }
+  // Returns the status of the path generator.
+  KShortestPathGeneratorStats GetStats() const;
 
  private:
-  using PathAndStartIndex = std::pair<LinkSequence, size_t>;
+  using PathAndStartIndex = std::pair<std::unique_ptr<Walk>, size_t>;
+  struct PathAndStartIndexComparator {
+    bool operator()(const PathAndStartIndex& a, const PathAndStartIndex& b) {
+      return *(a.first) > *(b.first);
+    }
+  };
 
   static size_t PathContainerSize(
-      const std::vector<PathAndStartIndex>& container) {
-    size_t total = container.capacity() * sizeof(PathAndStartIndex);
-    for (const auto& path : container) {
-      total += path.first.InMemBytesEstimate() - sizeof(LinkSequence);
-    }
-
-    return total;
-  }
+      const std::vector<PathAndStartIndex>& container);
 
   // Shortest path between two nodes.
-  LinkSequence ShortestPath(GraphNodeIndex src, GraphNodeIndex dst,
-                            const GraphNodeSet& nodes_to_avoid,
-                            const GraphLinkSet& links_to_avoid,
-                            const Links& links_so_far);
+  Walk ShortestPath(GraphNodeIndex src, GraphNodeIndex dst,
+                    const GraphNodeSet& nodes_to_avoid,
+                    const GraphLinkSet& links_to_avoid,
+                    const Links& links_so_far);
 
   // Adds the next shortest paths to the K shortest paths list. Returns true if
   // no more shortest paths exist.
@@ -530,7 +528,7 @@ class KShortestPathsGenerator {
   Trie<GraphLinkIndex, uint32_t> k_paths_trie_;
 
   // Stores candidates for K shortest paths.
-  VectorPriorityQueue<PathAndStartIndex, std::greater<PathAndStartIndex>>
+  VectorPriorityQueue<PathAndStartIndex, PathAndStartIndexComparator>
       candidates_;
 
   // The source.
@@ -547,13 +545,16 @@ class KShortestPathsGenerator {
 
   // State for the SP calls.
   SubGraphShortestPathState sp_state_;
+
+  // An empty walk.
+  Walk empty_walk_;
 };
 
 // Like KShortestPathsGenerator above, but for a DisjointSubGraph.
 // class DisjointKShortestPathsGenerator {
 // public:
 //  // Returns the next shortest path, starting at the shortest.
-//  LinkSequence Next() {
+//  Walk Next() {
 //    if (queue_.empty()) {
 //      return {};
 //    }
@@ -562,7 +563,7 @@ class KShortestPathsGenerator {
 //    queue_.pop();
 //
 //    CHECK(!top.candidate.empty());
-//    LinkSequence to_return = std::move(top.candidate);
+//    Walk to_return = std::move(top.candidate);
 //
 //    top.candidate = top.generator->NextPath();
 //    if (!top.candidate.empty()) {
@@ -573,11 +574,11 @@ class KShortestPathsGenerator {
 //
 // private:
 //  struct PathGenAndPath {
-//    PathGenAndPath(KShortestPathsGenerator* generator, LinkSequence candidate)
+//    PathGenAndPath(KShortestPathsGenerator* generator, Walk candidate)
 //        : generator(generator), candidate(candidate) {}
 //
 //    ShortestPathGenerator* generator;
-//    LinkSequence candidate;
+//    Walk candidate;
 //  };
 //
 //  struct Comparator {

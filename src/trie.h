@@ -7,8 +7,6 @@
 #include <ncode/ncode_common/logging.h>
 #include <ncode/ncode_common/perfect_hash.h>
 
-#include "net.pb.h"
-
 namespace nc {
 namespace net {
 
