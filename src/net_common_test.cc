@@ -284,7 +284,7 @@ class DetourTest : public ::testing::Test {
   }
 
   Links GetLinks(const std::string& str) {
-    return storage_.WalkFromStringOrDie(str).links();
+    return storage_.WalkFromStringOrDie(str)->links();
   }
 
   DetourTest() : storage_(SetUpGraph()) {}

@@ -75,6 +75,48 @@ size_t ConstraintSet::MinVisit(const Links& links,
   return current_index + 1;
 }
 
+ConstraintSet ConstraintSet::SanitizeConstraints(GraphNodeIndex src,
+                                                 GraphNodeIndex dst) const {
+  if (to_visit_.empty()) {
+    return *this;
+  }
+
+  ConstraintSet to_return;
+  to_return.Exclude().Links(exclusion_set_.links_to_exclude());
+  to_return.Exclude().Nodes(exclusion_set_.nodes_to_exclude());
+
+  for (size_t i = 0; i < to_visit_.size(); ++i) {
+    GraphNodeSet set = to_visit_[i];
+
+    if (i == 0 && set.Contains(src)) {
+      set.Clear();
+    } else if (i == to_visit_.size() - 1 && set.Contains(dst)) {
+      set.Clear();
+    } else {
+      CHECK(!set.Contains(src) || !set.Contains(dst))
+          << "src/dst can only be part of the first/last set";
+    }
+
+    if (set.Empty()) {
+      continue;
+    }
+
+    to_return.AddToVisitSet(set);
+  }
+
+  return to_return;
+}
+
+std::string ConstraintSet::ToString(const GraphStorage& storage) const {
+  std::vector<std::string> visit_constraints;
+  for (const auto& set_to_visit : to_visit_) {
+    visit_constraints.emplace_back(GraphNodeSetToString(set_to_visit, storage));
+  }
+
+  return Substitute("$0, visit nodes $1", exclusion_set_.ToString(storage),
+                    Join(visit_constraints, "->"));
+}
+
 DirectedGraph::DirectedGraph(const GraphStorage* storage)
     : graph_storage_(storage) {
   PopulateAdjacencyList();
@@ -122,8 +164,8 @@ void SubGraph::PathsRecursive(const DFSConfig& config, GraphNodeIndex at,
       return;
     }
 
-    //    LOG(ERROR) << "min v " << min_v;
-    path_callback(Walk(*current, *total_distance));
+    auto new_walk = make_unique<Walk>(*current, *total_distance);
+    path_callback(std::move(new_walk));
     return;
   }
 
@@ -224,7 +266,7 @@ static Links RecoverPath(
   return links_reverse;
 }
 
-Walk ShortestPath::GetPath(GraphNodeIndex dst) const {
+std::unique_ptr<Walk> ShortestPath::GetPath(GraphNodeIndex dst) const {
   CHECK(destinations_.Contains(dst)) << "Bad destination";
 
   Links links = RecoverPath(src_, dst, previous_);
@@ -233,7 +275,7 @@ Walk ShortestPath::GetPath(GraphNodeIndex dst) const {
   }
 
   Delay distance = min_delays_[dst].distance;
-  return {links, distance};
+  return make_unique<Walk>(links, distance);
 }
 
 Delay ShortestPath::GetPathDistance(GraphNodeIndex dst) const {
@@ -333,8 +375,8 @@ void ShortestPath::ComputePaths(const ExclusionSet& exclusion_set,
   }
 }
 
-net::Walk AllPairShortestPath::GetPath(GraphNodeIndex src,
-                                       GraphNodeIndex dst) const {
+std::unique_ptr<Walk> AllPairShortestPath::GetPath(GraphNodeIndex src,
+                                                   GraphNodeIndex dst) const {
   Delay dist = data_[src][dst].distance;
   if (dist == Delay::max()) {
     return {};
@@ -348,7 +390,7 @@ net::Walk AllPairShortestPath::GetPath(GraphNodeIndex src,
     next = datum.next_node;
   }
 
-  return {links, dist};
+  return make_unique<Walk>(links, dist);
 }
 
 Delay AllPairShortestPath::GetDistance(GraphNodeIndex src,
@@ -424,7 +466,7 @@ std::pair<GraphNodeSet, GraphLinkSet> ShortestPath::ElementsInTree() const {
 
 using VisitList = std::vector<GraphNodeSet>;
 
-static Walk ShortestPathStatic(
+static std::unique_ptr<Walk> ShortestPathStatic(
     const GraphNodeIndex src, const GraphNodeIndex dst,
     const GraphNodeSet& nodes_to_avoid, const GraphLinkSet& links_to_avoid,
     const ExclusionSet& exclusion_set, VisitList::const_iterator to_visit_from,
@@ -530,29 +572,32 @@ static Walk ShortestPathStatic(
   ExclusionSet dummy;
   net::ShortestPath path_graph_sp(src, {dst}, dummy, path_graph_adj_list,
                                   nullptr, nullptr);
-  Walk sp = path_graph_sp.GetPath(dst);
+  std::unique_ptr<Walk> sp = path_graph_sp.GetPath(dst);
+  if (!sp) {
+    return {};
+  }
 
   Links final_path;
   Delay total_delay = Delay::zero();
-  for (GraphLinkIndex path_graph_link : sp.links()) {
+  for (GraphLinkIndex path_graph_link : sp->links()) {
     GraphNodeIndex sub_path_from;
     GraphNodeIndex sub_path_to;
     std::tie(sub_path_from, sub_path_to) = link_map[path_graph_link];
-    //    LOG(ERROR) << "Subpath from " << sub_path_from << " to " <<
-    //    sub_path_to;
 
     const net::ShortestPath* sp_tree =
         sp_trees.GetValueOrDie(sub_path_from).get();
-    Walk sub_path = sp_tree->GetPath(sub_path_to);
-    final_path.insert(final_path.end(), sub_path.links().begin(),
-                      sub_path.links().end());
-    total_delay += sub_path.delay();
+    std::unique_ptr<Walk> sub_path = sp_tree->GetPath(sub_path_to);
+    CHECK(sub_path);
+    final_path.insert(final_path.end(), sub_path->links().begin(),
+                      sub_path->links().end());
+    total_delay += sub_path->delay();
   }
 
-  return {final_path, total_delay};
+  return make_unique<Walk>(final_path, total_delay);
 }
 
-Walk SubGraph::ShortestPath(GraphNodeIndex src, GraphNodeIndex dst) const {
+std::unique_ptr<Walk> SubGraph::ShortestPath(GraphNodeIndex src,
+                                             GraphNodeIndex dst) const {
   SubGraphShortestPathState sp_state;
   ConstraintSet sanitized_constraints =
       constraints_->SanitizeConstraints(src, dst);
@@ -564,15 +609,11 @@ Walk SubGraph::ShortestPath(GraphNodeIndex src, GraphNodeIndex dst) const {
                             parent()->AdjacencyList(), &sp_state);
 }
 
-Walk KShortestPathsGenerator::ShortestPath(GraphNodeIndex src,
-                                           GraphNodeIndex dst,
-                                           const GraphNodeSet& nodes_to_avoid,
-                                           const GraphLinkSet& links_to_avoid,
-                                           const Links& links_so_far) {
+std::unique_ptr<Walk> KShortestPathsGenerator::ShortestPath(
+    GraphNodeIndex src, GraphNodeIndex dst, const GraphNodeSet& nodes_to_avoid,
+    const GraphLinkSet& links_to_avoid, const Links& links_so_far) {
   size_t to_visit_index =
       constraints_.MinVisit(links_so_far, *graph_->graph_storage());
-  //  LOG(ERROR) << "KSP from " << to_visit_index << " links_so_far "
-  //             << LinksToString(links_so_far, graph_->graph_storage());
   const VisitList& to_visit = constraints_.to_visit();
   auto start_it = std::next(to_visit.begin(), to_visit_index);
 
@@ -585,8 +626,8 @@ bool KShortestPathsGenerator::NextPath() {
   const GraphStorage* graph_storage = graph_->graph_storage();
 
   if (k_paths_.empty()) {
-    auto path = make_unique<Walk>(ShortestPath(src_, dst_, {}, {}, {}));
-    if (path->empty()) {
+    auto path = ShortestPath(src_, dst_, {}, {}, {});
+    if (!path) {
       return false;
     }
 
@@ -615,10 +656,10 @@ bool KShortestPathsGenerator::NextPath() {
     }
 
     GetLinkExclusionSet(root_path, &links_to_exclude);
-    Walk spur_path = ShortestPath(spur_node, dst_, nodes_to_exclude,
+    auto spur_path = ShortestPath(spur_node, dst_, nodes_to_exclude,
                                   links_to_exclude, root_path);
-    if (!spur_path.empty()) {
-      const Links& spur_path_links = spur_path.links();
+    if (spur_path) {
+      const Links& spur_path_links = spur_path->links();
 
       Links candidate_links = root_path;
       candidate_links.insert(candidate_links.end(), spur_path_links.begin(),
@@ -627,7 +668,6 @@ bool KShortestPathsGenerator::NextPath() {
       candidates_.emplace(std::move(candidate_path), i);
     }
 
-    //    links_to_exclude.Clear();
     nodes_to_exclude.Insert(spur_node);
     root_path.emplace_back(link_index);
   }
@@ -643,7 +683,7 @@ bool KShortestPathsGenerator::NextPath() {
   return true;
 }
 
-const Walk* KShortestPathsGenerator::KthShortestPath(size_t k) {
+const Walk* KShortestPathsGenerator::KthShortestPathOrNull(size_t k) {
   if (k < k_paths_.size()) {
     return k_paths_[k].first.get();
   }
@@ -651,7 +691,7 @@ const Walk* KShortestPathsGenerator::KthShortestPath(size_t k) {
   size_t delta = k + 1 - k_paths_.size();
   for (size_t i = 0; i < delta; ++i) {
     if (!NextPath()) {
-      return &empty_walk_;
+      return nullptr;
     }
   }
 
@@ -710,6 +750,69 @@ void KShortestPathsGenerator::GetLinkExclusionSet(const Links& root_path,
     const Links& k_path_links = k_paths_[k].first->links();
     CHECK(k_path_links.size() > root_path.size());
     out->Insert(k_path_links[root_path.size()]);
+  }
+}
+
+const Walk* DisjunctKShortestPathsGenerator::PopAndEnqueue() {
+  PathGenAndPath top = queue_.PopTop();
+  KShortestPathsGenerator* ksp_gen = top.generator;
+  CHECK(top.candidate != nullptr);
+  const Walk* to_return = top.candidate;
+
+  top.candidate = ksp_gen->KthShortestPathOrNull(ksp_gen->k());
+  if (top.candidate != nullptr) {
+    queue_.emplace(top);
+  }
+
+  return to_return;
+}
+
+const Walk* DisjunctKShortestPathsGenerator::Next() {
+  if (queue_.empty()) {
+    return nullptr;
+  }
+
+  const Walk* to_return = PopAndEnqueue();
+  while (!queue_.empty() && (*queue_.top().candidate == *to_return)) {
+    // Will keep popping from the queue until we get to a different path. Cannot
+    // simply compare pointers, as the paths come from different generators.
+    PopAndEnqueue();
+  }
+
+  return to_return;
+}
+
+const Walk* DisjunctKShortestPathsGenerator::KthShortestPathOrNull(size_t k) {
+  if (k < k_paths_.size()) {
+    return k_paths_[k];
+  }
+
+  size_t delta = k + 1 - k_paths_.size();
+  for (size_t i = 0; i < delta; ++i) {
+    const Walk* next = Next();
+    if (next == nullptr) {
+      return nullptr;
+    }
+
+    k_paths_.emplace_back(next);
+  }
+
+  return k_paths_.back();
+}
+
+DisjunctKShortestPathsGenerator::DisjunctKShortestPathsGenerator(
+    GraphNodeIndex src, GraphNodeIndex dst,
+    const std::vector<const SubGraph*>& sub_graphs) {
+  for (const SubGraph* sub_graph : sub_graphs) {
+    ksp_generators_.emplace_back(
+        make_unique<KShortestPathsGenerator>(src, dst, *sub_graph));
+  }
+
+  for (auto& generator : ksp_generators_) {
+    const Walk* walk = generator->KthShortestPathOrNull(generator->k());
+    if (walk != nullptr) {
+      queue_.emplace(generator.get(), walk);
+    }
   }
 }
 

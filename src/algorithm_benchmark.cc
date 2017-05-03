@@ -55,7 +55,7 @@ size_t CountSimplePaths(const std::vector<const net::Walk*>& paths,
 
 // Compares two lists of paths and returns true if the first count simple paths
 // from both are the same.
-static double Compare(const std::vector<net::Walk>& paths_one,
+static double Compare(const std::vector<std::unique_ptr<net::Walk>>& paths_one,
                       const std::vector<const net::Walk*>& paths_two,
                       size_t count, const net::GraphStorage& storage) {
   CHECK(paths_one.size() >= count);
@@ -68,12 +68,10 @@ static double Compare(const std::vector<net::Walk>& paths_one,
     const net::Walk* ls_one;
     while (true) {
       CHECK(paths_one.size() > i_one);
-      ls_one = &paths_one[i_one++];
+      ls_one = paths_one[i_one++].get();
       if (ls_one->IsPath(storage)) {
         break;
       }
-
-      //      LOG(ERROR) << "Skipping1 " << ls_one->ToStringNoPorts(storage);
     }
 
     const net::Walk* ls_two;
@@ -83,20 +81,11 @@ static double Compare(const std::vector<net::Walk>& paths_one,
       if (ls_two->IsPath(storage)) {
         break;
       }
-
-      //      LOG(ERROR) << "Skipping2 " << ls_two->ToStringNoPorts(storage);
     }
 
     double delta = std::abs(ls_one->delay().count() - ls_two->delay().count());
 
     total_delta += delta;
-    //    if (*ls_one != *ls_two) {
-    //      CLOG(ERROR, RED) << ls_one->ToStringNoPorts(storage) << " vs "
-    //                       << ls_two->ToStringNoPorts(storage);
-    //    } else {
-    //      CLOG(ERROR, GREEN) << ls_one->ToStringNoPorts(storage) << " vs "
-    //                         << ls_two->ToStringNoPorts(storage);
-    //    }
   }
 
   return total_delta / count;
@@ -151,20 +140,25 @@ milliseconds SinglePassSingleConstraint(const net::GraphStorage& storage,
   LOG(ERROR) << constraints.ToString(storage);
 
   std::vector<const net::Walk*> paths;
-  std::vector<net::Walk> all_paths;
+  std::vector<std::unique_ptr<net::Walk>> all_paths;
 
   net::SubGraph sub_graph(&graph, &constraints);
-  sub_graph.Paths(src_node,
-                  dst_node, [&all_paths, &storage](const net::Walk& links) {
-                    all_paths.emplace_back(links);
-                  }, {});
-  std::sort(all_paths.begin(), all_paths.end());
+  sub_graph.Paths(src_node, dst_node,
+                  [&all_paths, &storage](std::unique_ptr<net::Walk> walk) {
+                    all_paths.emplace_back(std::move(walk));
+                  },
+                  {});
+  std::sort(all_paths.begin(), all_paths.end(),
+            [](const std::unique_ptr<net::Walk>& lhs,
+               const std::unique_ptr<net::Walk>& rhs) {
+              return lhs->delay() < rhs->delay();
+            });
 
   auto start = high_resolution_clock::now();
-  net::KShortestPathsGenerator ksp(src_node, dst_node, &sub_graph);
+  net::KShortestPathsGenerator ksp(src_node, dst_node, sub_graph);
   for (size_t i = 0; i < count; ++i) {
-    const net::Walk* p = ksp.KthShortestPath(i);
-    if (!p->empty()) {
+    const net::Walk* p = ksp.KthShortestPathOrNull(i);
+    if (p != nullptr) {
       paths.emplace_back(p);
     }
   }

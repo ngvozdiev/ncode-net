@@ -76,47 +76,9 @@ class ConstraintSet {
   // Will make sure that the constrains do not have 'src' in the first set to
   // visit and 'dst' in the last set to visit.
   ConstraintSet SanitizeConstraints(GraphNodeIndex src,
-                                    GraphNodeIndex dst) const {
-    if (to_visit_.empty()) {
-      return *this;
-    }
+                                    GraphNodeIndex dst) const;
 
-    ConstraintSet to_return;
-    to_return.Exclude().Links(exclusion_set_.links_to_exclude());
-    to_return.Exclude().Nodes(exclusion_set_.nodes_to_exclude());
-
-    for (size_t i = 0; i < to_visit_.size(); ++i) {
-      GraphNodeSet set = to_visit_[i];
-
-      if (i == 0 && set.Contains(src)) {
-        set.Clear();
-      } else if (i == to_visit_.size() - 1 && set.Contains(dst)) {
-        set.Clear();
-      } else {
-        CHECK(!set.Contains(src) || !set.Contains(dst))
-            << "src/dst can only be part of the first/last set";
-      }
-
-      if (set.Empty()) {
-        continue;
-      }
-
-      to_return.AddToVisitSet(set);
-    }
-
-    return to_return;
-  }
-
-  std::string ToString(const GraphStorage& storage) const {
-    std::vector<std::string> visit_constraints;
-    for (const auto& set_to_visit : to_visit_) {
-      visit_constraints.emplace_back(
-          GraphNodeSetToString(set_to_visit, storage));
-    }
-
-    return Substitute("$0, visit nodes $1", exclusion_set_.ToString(storage),
-                      Join(visit_constraints, "->"));
-  }
+  std::string ToString(const GraphStorage& storage) const;
 
  private:
   // Links/nodes that will be excluded from the graph.
@@ -192,7 +154,7 @@ class ShortestPath {
   }
 
   // Returns the shortest path to the destination.
-  Walk GetPath(GraphNodeIndex dst) const;
+  std::unique_ptr<Walk> GetPath(GraphNodeIndex dst) const;
 
   // Returns the distance from the source to a destination.
   Delay GetPathDistance(GraphNodeIndex dst) const;
@@ -257,7 +219,7 @@ class AllPairShortestPath {
   }
 
   // Returns the shortest path between src and dst.
-  Walk GetPath(GraphNodeIndex src, GraphNodeIndex dst) const;
+  std::unique_ptr<Walk> GetPath(GraphNodeIndex src, GraphNodeIndex dst) const;
 
   // Returns the length of the shortest path between src and dst.
   Delay GetDistance(GraphNodeIndex src, GraphNodeIndex dst) const;
@@ -326,7 +288,7 @@ struct DFSConfig {
 // functionality.
 class SubGraph {
  public:
-  using PathCallback = std::function<void(const Walk&)>;
+  using PathCallback = std::function<void(std::unique_ptr<Walk>)>;
 
   SubGraph(const DirectedGraph* parent, const ConstraintSet* constraints)
       : parent_(parent), constraints_(constraints) {}
@@ -339,7 +301,8 @@ class SubGraph {
   GraphNodeSet ReachableNodes(GraphNodeIndex src) const;
 
   // The shortest path between two nodes.
-  Walk ShortestPath(GraphNodeIndex src, GraphNodeIndex dst) const;
+  std::unique_ptr<Walk> ShortestPath(GraphNodeIndex src,
+                                     GraphNodeIndex dst) const;
 
   const DirectedGraph* parent() const { return parent_; }
 
@@ -360,63 +323,6 @@ class SubGraph {
   // Nodes/links to exclude.
   const ConstraintSet* constraints_;
 };
-
-// A directed graph and multiple sets of constraints, connected by a logical OR
-// class DisjointSubGraph {
-// public:
-//  DisjointSubGraph(const DirectedGraph* parent,
-//                   const std::vector<const ConstraintSet*>& constraints) {
-//    CHECK(!constraints.empty());
-//    for (const ConstraintSet* constraint_set : constraints) {
-//      sub_graphs_.emplace_back(parent, constraint_set);
-//    }
-//  }
-//
-//  // Returns all paths between a source and a destination, sorted in order
-//  // of increasing delay. This function does not allow a callback to be called
-//  // with each path because the sets of paths returned by each subgraph's DFS
-//  // may overlap---need to store them and make sure they are unique.
-//  std::set<Walk> Paths(GraphNodeIndex src, GraphNodeIndex dst,
-//                               const DFSConfig& dfs_config) const {
-//    std::set<Walk> all_paths;
-//    for (const auto& sub_graph : sub_graphs_) {
-//      sub_graph.Paths(src, dst, [&all_paths](const Walk& links) {
-//        all_paths.emplace(links);
-//      }, dfs_config);
-//    }
-//
-//    return all_paths;
-//  }
-//
-//  // The set of nodes that are reachable from a given node.
-//  GraphNodeSet ReachableNodes(GraphNodeIndex src) const {
-//    GraphNodeSet out;
-//    for (const auto& sub_graph : sub_graphs_) {
-//      out.InsertAll(sub_graph.ReachableNodes(src));
-//    }
-//
-//    return out;
-//  }
-//
-//  // The shortest path between two nodes.
-//  Walk ShortestPath(GraphNodeIndex src, GraphNodeIndex dst) const {
-//    Walk shortest;
-//    Delay shortest_delay = Delay::max();
-//
-//    for (const auto& sub_graph : sub_graphs_) {
-//      Walk sub_graph_sp = sub_graph.ShortestPath(src, dst);
-//      if (sub_graph_sp.delay() < shortest_delay) {
-//        shortest = sub_graph_sp;
-//        shortest_delay = sub_graph_sp.delay();
-//      }
-//    }
-//
-//    return shortest;
-//  }
-//
-// private:
-//  std::vector<SubGraph> sub_graphs_;
-//};
 
 struct SubGraphShortestPathState {
   void Clear() {
@@ -484,17 +390,21 @@ struct KShortestPathGeneratorStats {
 class KShortestPathsGenerator {
  public:
   KShortestPathsGenerator(GraphNodeIndex src, GraphNodeIndex dst,
-                          SubGraph* sub_graph)
+                          const SubGraph& sub_graph)
       : src_(src),
         dst_(dst),
-        constraints_(sub_graph->constraints()->SanitizeConstraints(src, dst)),
-        graph_(sub_graph->parent()) {}
+        constraints_(sub_graph.constraints()->SanitizeConstraints(src, dst)),
+        graph_(sub_graph.parent()) {}
 
   // Returns the Kth shortest path. The path is owned by this object.
-  const Walk* KthShortestPath(size_t k);
+  const Walk* KthShortestPathOrNull(size_t k);
 
   // Returns the status of the path generator.
   KShortestPathGeneratorStats GetStats() const;
+
+  size_t k() const { return k_paths_.size(); }
+
+  const DirectedGraph* graph() const { return graph_; }
 
  private:
   using PathAndStartIndex = std::pair<std::unique_ptr<Walk>, size_t>;
@@ -508,10 +418,10 @@ class KShortestPathsGenerator {
       const std::vector<PathAndStartIndex>& container);
 
   // Shortest path between two nodes.
-  Walk ShortestPath(GraphNodeIndex src, GraphNodeIndex dst,
-                    const GraphNodeSet& nodes_to_avoid,
-                    const GraphLinkSet& links_to_avoid,
-                    const Links& links_so_far);
+  std::unique_ptr<Walk> ShortestPath(GraphNodeIndex src, GraphNodeIndex dst,
+                                     const GraphNodeSet& nodes_to_avoid,
+                                     const GraphLinkSet& links_to_avoid,
+                                     const Links& links_so_far);
 
   // Adds the next shortest paths to the K shortest paths list. Returns true if
   // no more shortest paths exist.
@@ -545,57 +455,48 @@ class KShortestPathsGenerator {
 
   // State for the SP calls.
   SubGraphShortestPathState sp_state_;
-
-  // An empty walk.
-  Walk empty_walk_;
 };
 
-// Like KShortestPathsGenerator above, but for a DisjointSubGraph.
-// class DisjointKShortestPathsGenerator {
-// public:
-//  // Returns the next shortest path, starting at the shortest.
-//  Walk Next() {
-//    if (queue_.empty()) {
-//      return {};
-//    }
-//
-//    PathGenAndPath top = queue_.top();
-//    queue_.pop();
-//
-//    CHECK(!top.candidate.empty());
-//    Walk to_return = std::move(top.candidate);
-//
-//    top.candidate = top.generator->NextPath();
-//    if (!top.candidate.empty()) {
-//      queue_.push(top);
-//    }
-//    return to_return;
-//  }
-//
-// private:
-//  struct PathGenAndPath {
-//    PathGenAndPath(KShortestPathsGenerator* generator, Walk candidate)
-//        : generator(generator), candidate(candidate) {}
-//
-//    ShortestPathGenerator* generator;
-//    Walk candidate;
-//  };
-//
-//  struct Comparator {
-//    bool operator()(const PathGenAndPath& lhs, const PathGenAndPath& rhs) {
-//      return lhs.candidate.delay() < rhs.candidate.delay();
-//    }
-//  };
-//
-//  // A priority queue that has as many elements as there are KSP generators.
-//  // When the next path is generated the minimum of the queue is taken and
-//  // another path is generated from the generator that generated the minimum.
-//  std::priority_queue<PathGenAndPath, std::vector<PathGenAndPath>, Comparator>
-//      queue_;
-//
-//  // The generators.
-//  std::vector<KShortestPathsGenerator> ksp_generators_;
-//};
+// Like KShortestPathsGenerator above, but handles multiple constraint sets.
+class DisjunctKShortestPathsGenerator {
+ public:
+  DisjunctKShortestPathsGenerator(
+      GraphNodeIndex src, GraphNodeIndex dst,
+      const std::vector<const SubGraph*>& sub_graphs);
+
+  const Walk* KthShortestPathOrNull(size_t k);
+
+ private:
+  struct PathGenAndPath {
+    PathGenAndPath(KShortestPathsGenerator* generator, const Walk* candidate)
+        : generator(generator), candidate(candidate) {}
+
+    KShortestPathsGenerator* generator;
+    const Walk* candidate;
+  };
+
+  struct Comparator {
+    bool operator()(const PathGenAndPath& lhs, const PathGenAndPath& rhs) {
+      return lhs.candidate->delay() > rhs.candidate->delay();
+    }
+  };
+
+  // Returns the next shortest path, starting at the shortest.
+  const Walk* Next();
+
+  const Walk* PopAndEnqueue();
+
+  // A priority queue that has as many elements as there are KSP generators.
+  // When the next path is generated the minimum of the queue is taken and
+  // another path is generated from the generator that generated the minimum.
+  VectorPriorityQueue<PathGenAndPath, Comparator> queue_;
+
+  // The generators.
+  std::vector<std::unique_ptr<KShortestPathsGenerator>> ksp_generators_;
+
+  // The K shortest paths, owned by their respective generators.
+  std::vector<const Walk*> k_paths_;
+};
 
 }  // namespace nc
 }  // namespace ncode

@@ -288,6 +288,8 @@ class Walk {
 
   // The total delay of all links in the walk.
   Delay delay_;
+
+  DISALLOW_COPY_AND_ASSIGN(Walk);
 };
 
 // General statistics about a graph.
@@ -379,7 +381,8 @@ class GraphStorage {
 
   // Returns a walk from a string of the form [A->B, B->C]. Port
   // numbers cannot be specified -- do not use if double edges are possible.
-  Walk WalkFromStringOrDie(const std::string& path_string) const;
+  std::unique_ptr<Walk> WalkFromStringOrDie(
+      const std::string& path_string) const;
 
   // A convenience function equivalent to calling StringToPath followed by
   // std::find to check if haystack contains the walk needle.

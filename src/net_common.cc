@@ -415,7 +415,8 @@ bool operator!=(const Walk& lhs, const Walk& rhs) {
   return lhs.links_ != rhs.links_;
 }
 
-Walk GraphStorage::WalkFromStringOrDie(const std::string& path_string) const {
+std::unique_ptr<Walk> GraphStorage::WalkFromStringOrDie(
+    const std::string& path_string) const {
   CHECK(path_string.length() > 1) << "Path string malformed: " << path_string;
   CHECK(path_string.front() == '[' && path_string.back() == ']')
       << "Path string malformed: " << path_string;
@@ -440,15 +441,15 @@ Walk GraphStorage::WalkFromStringOrDie(const std::string& path_string) const {
     links.push_back(LinkOrDie(src, dst));
   }
 
-  return {links, TotalDelayOfLinks(links, *this)};
+  return make_unique<Walk>(links, TotalDelayOfLinks(links, *this));
 }
 
 bool GraphStorage::IsInWalks(const std::string& needle,
                              const std::vector<Walk>& haystack) const {
-  Walk walk = WalkFromStringOrDie(needle);
+  std::unique_ptr<Walk> walk = WalkFromStringOrDie(needle);
 
   for (const Walk& path_in_haystack : haystack) {
-    if (path_in_haystack.links() == walk.links()) {
+    if (path_in_haystack.links() == walk->links()) {
       return true;
     }
   }
