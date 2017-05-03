@@ -117,7 +117,6 @@ milliseconds SinglePassSingleConstraint(const net::GraphStorage& storage,
                                         net::GraphNodeIndex dst_node,
                                         size_t to_visit_size, size_t count,
                                         bool single) {
-  net::DirectedGraph graph(&storage);
   net::ConstraintSet constraints;
 
   if (to_visit_size > 0) {
@@ -142,12 +141,11 @@ milliseconds SinglePassSingleConstraint(const net::GraphStorage& storage,
   std::vector<const net::Walk*> paths;
   std::vector<std::unique_ptr<net::Walk>> all_paths;
 
-  net::SubGraph sub_graph(&graph, &constraints);
-  sub_graph.Paths(src_node, dst_node,
-                  [&all_paths, &storage](std::unique_ptr<net::Walk> walk) {
+  net::SubGraph sub_graph(&storage, &constraints);
+  sub_graph.Paths(src_node,
+                  dst_node, [&all_paths](std::unique_ptr<net::Walk> walk) {
                     all_paths.emplace_back(std::move(walk));
-                  },
-                  {});
+                  }, {});
   std::sort(all_paths.begin(), all_paths.end(),
             [](const std::unique_ptr<net::Walk>& lhs,
                const std::unique_ptr<net::Walk>& rhs) {

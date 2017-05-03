@@ -316,6 +316,55 @@ class GraphBuilder {
   std::vector<GraphLinkBase> links_;
 };
 
+// Maintains connectivity information about a graph, and allows for quick
+// retrieval of link information (without going to a GraphStorage etc.).
+class AdjacencyList {
+ public:
+  struct LinkInfo {
+    GraphLinkIndex link_index;
+    GraphNodeIndex src_index;
+    GraphNodeIndex dst_index;
+    Delay delay;
+  };
+
+  void AddLink(GraphLinkIndex link_index, GraphNodeIndex src,
+               GraphNodeIndex dst, Delay delay) {
+    adj_[src].push_back({link_index, src, dst, delay});
+    all_nodes_.Insert(src);
+    all_nodes_.Insert(dst);
+  }
+
+  void Clear() {
+    adj_.Clear();
+    all_nodes_.Clear();
+  }
+
+  // The neighbors of a node. Empty if the node is a leaf.
+  const std::vector<LinkInfo>& GetNeighbors(const GraphNodeIndex node) const {
+    if (!adj_.HasValue(node)) {
+      return empty_;
+    }
+
+    return adj_.GetValueOrDie(node);
+  }
+
+  const GraphNodeSet& AllNodes() const { return all_nodes_; }
+
+  const GraphNodeMap<std::vector<LinkInfo>>& Adjacencies() const {
+    return adj_;
+  }
+
+ private:
+  // An empty vector that GetNeighbors can return a reference to.
+  std::vector<LinkInfo> empty_;
+
+  // For each node its neighbors.
+  GraphNodeMap<std::vector<LinkInfo>> adj_;
+
+  // All nodes/links.
+  GraphNodeSet all_nodes_;
+};
+
 // Stores and maintains a graph.
 class GraphStorage {
  public:
@@ -389,13 +438,22 @@ class GraphStorage {
   bool IsInWalks(const std::string& needle,
                  const std::vector<Walk>& haystack) const;
 
+  // Returns the adjacency list.
+  const net::AdjacencyList& AdjacencyList() const { return adjacency_list_; }
+
+  // Returns true if there is at most one link between any two nodes.
+  bool IsSimple() const { return simple_; }
+
  private:
-  GraphStorage() {}
+  GraphStorage() : simple_(true) {}
 
   using LinkStore =
       PerfectHashStore<std::unique_ptr<GraphLink>, uint16_t, GraphLink>;
   using NodeStore =
       PerfectHashStore<std::unique_ptr<GraphNode>, uint16_t, GraphNode>;
+
+  // Builds adjacency_list_. Called once upon construction.
+  void PopulateAdjacencyList();
 
   // Returns the name of a cluster of nodes.
   std::string GetClusterName(const GraphNodeSet& nodes) const;
@@ -412,6 +470,12 @@ class GraphStorage {
 
   LinkStore link_store_;
   NodeStore node_store_;
+
+  // The graph's adjacency list.
+  net::AdjacencyList adjacency_list_;
+
+  // True if there are no multiple edges between any two nodes.
+  bool simple_;
 
   DISALLOW_COPY_AND_ASSIGN(GraphStorage);
 };

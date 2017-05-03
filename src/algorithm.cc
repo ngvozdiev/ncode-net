@@ -117,27 +117,6 @@ std::string ConstraintSet::ToString(const GraphStorage& storage) const {
                     Join(visit_constraints, "->"));
 }
 
-DirectedGraph::DirectedGraph(const GraphStorage* storage)
-    : graph_storage_(storage) {
-  PopulateAdjacencyList();
-}
-
-void DirectedGraph::PopulateAdjacencyList() {
-  simple_ = true;
-  for (GraphLinkIndex link : graph_storage_->AllLinks()) {
-    const GraphLink* link_ptr = graph_storage_->GetLink(link);
-    GraphNodeIndex src = link_ptr->src();
-    GraphNodeIndex dst = link_ptr->dst();
-    for (const auto& link_info : adjacency_list_.GetNeighbors(src)) {
-      if (link_info.dst_index == dst) {
-        simple_ = false;
-      }
-    }
-
-    adjacency_list_.AddLink(link, src, dst, link_ptr->delay());
-  }
-}
-
 void SubGraph::Paths(GraphNodeIndex src, GraphNodeIndex dst,
                      PathCallback path_callback,
                      const DFSConfig& config) const {
@@ -159,7 +138,7 @@ void SubGraph::PathsRecursive(const DFSConfig& config, GraphNodeIndex at,
   }
 
   if (at == dst) {
-    size_t min_v = constraints_->MinVisit(*current, *parent_->graph_storage());
+    size_t min_v = constraints_->MinVisit(*current, *storage_);
     if (min_v != constraints_->to_visit().size()) {
       return;
     }
@@ -174,7 +153,7 @@ void SubGraph::PathsRecursive(const DFSConfig& config, GraphNodeIndex at,
     return;
   }
 
-  const AdjacencyList& adjacency_list = parent_->AdjacencyList();
+  const AdjacencyList& adjacency_list = storage_->AdjacencyList();
   const std::vector<AdjacencyList::LinkInfo>& outgoing_links =
       adjacency_list.GetNeighbors(at);
 
@@ -227,7 +206,7 @@ void SubGraph::ReachableNodesRecursive(GraphNodeIndex at,
   }
   nodes_seen->Insert(at);
 
-  const AdjacencyList& adjacency_list = parent_->AdjacencyList();
+  const AdjacencyList& adjacency_list = storage_->AdjacencyList();
   const std::vector<AdjacencyList::LinkInfo>& outgoing_links =
       adjacency_list.GetNeighbors(at);
 
@@ -606,25 +585,22 @@ std::unique_ptr<Walk> SubGraph::ShortestPath(GraphNodeIndex src,
                             sanitized_constraints.exclusion_set(),
                             sanitized_constraints.to_visit().begin(),
                             sanitized_constraints.to_visit().end(),
-                            parent()->AdjacencyList(), &sp_state);
+                            storage_->AdjacencyList(), &sp_state);
 }
 
 std::unique_ptr<Walk> KShortestPathsGenerator::ShortestPath(
     GraphNodeIndex src, GraphNodeIndex dst, const GraphNodeSet& nodes_to_avoid,
     const GraphLinkSet& links_to_avoid, const Links& links_so_far) {
-  size_t to_visit_index =
-      constraints_.MinVisit(links_so_far, *graph_->graph_storage());
+  size_t to_visit_index = constraints_.MinVisit(links_so_far, *storage_);
   const VisitList& to_visit = constraints_.to_visit();
   auto start_it = std::next(to_visit.begin(), to_visit_index);
 
   return ShortestPathStatic(
       src, dst, nodes_to_avoid, links_to_avoid, constraints_.exclusion_set(),
-      start_it, to_visit.end(), graph_->AdjacencyList(), &sp_state_);
+      start_it, to_visit.end(), storage_->AdjacencyList(), &sp_state_);
 }
 
 bool KShortestPathsGenerator::NextPath() {
-  const GraphStorage* graph_storage = graph_->graph_storage();
-
   if (k_paths_.empty()) {
     auto path = ShortestPath(src_, dst_, {}, {}, {});
     if (!path) {
@@ -647,7 +623,7 @@ bool KShortestPathsGenerator::NextPath() {
   Links root_path;
   for (size_t i = 0; i < last_path_links.size(); ++i) {
     GraphLinkIndex link_index = last_path_links[i];
-    const GraphLink* link = graph_storage->GetLink(link_index);
+    const GraphLink* link = storage_->GetLink(link_index);
     GraphNodeIndex spur_node = link->src();
     if (i < start_index) {
       nodes_to_exclude.Insert(spur_node);
@@ -664,7 +640,7 @@ bool KShortestPathsGenerator::NextPath() {
       Links candidate_links = root_path;
       candidate_links.insert(candidate_links.end(), spur_path_links.begin(),
                              spur_path_links.end());
-      auto candidate_path = make_unique<Walk>(candidate_links, *graph_storage);
+      auto candidate_path = make_unique<Walk>(candidate_links, *storage_);
       candidates_.emplace(std::move(candidate_path), i);
     }
 

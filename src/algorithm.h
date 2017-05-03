@@ -92,55 +92,6 @@ class ConstraintSet {
   GraphNodeMap<size_t> node_to_visit_index_;
 };
 
-// Maintains connectivity information about a graph, and allows for quick
-// retrieval of link information (without going to a GraphStorage etc.).
-class AdjacencyList {
- public:
-  struct LinkInfo {
-    GraphLinkIndex link_index;
-    GraphNodeIndex src_index;
-    GraphNodeIndex dst_index;
-    Delay delay;
-  };
-
-  void AddLink(GraphLinkIndex link_index, GraphNodeIndex src,
-               GraphNodeIndex dst, Delay delay) {
-    adj_[src].push_back({link_index, src, dst, delay});
-    all_nodes_.Insert(src);
-    all_nodes_.Insert(dst);
-  }
-
-  void Clear() {
-    adj_.Clear();
-    all_nodes_.Clear();
-  }
-
-  // The neighbors of a node. Empty if the node is a leaf.
-  const std::vector<LinkInfo>& GetNeighbors(const GraphNodeIndex node) const {
-    if (!adj_.HasValue(node)) {
-      return empty_;
-    }
-
-    return adj_.GetValueOrDie(node);
-  }
-
-  const GraphNodeSet& AllNodes() const { return all_nodes_; }
-
-  const GraphNodeMap<std::vector<LinkInfo>>& Adjacencies() const {
-    return adj_;
-  }
-
- private:
-  // An empty vector that GetNeighbors can return a reference to.
-  std::vector<LinkInfo> empty_;
-
-  // For each node its neighbors.
-  GraphNodeMap<std::vector<LinkInfo>> adj_;
-
-  // All nodes/links.
-  GraphNodeSet all_nodes_;
-};
-
 // Single source shortest path tree from a source to a set of nodes.
 class ShortestPath {
  public:
@@ -252,31 +203,6 @@ class AllPairShortestPath {
 struct NodeGroupTag {};
 using NodeGroup = TypesafeUintWrapper<NodeGroupTag, uint8_t>;
 
-// A directed graph.
-class DirectedGraph {
- public:
-  DirectedGraph(const GraphStorage* parent);
-
-  // Returns the adjacency list.
-  const net::AdjacencyList& AdjacencyList() const { return adjacency_list_; }
-
-  // Returns true if there is at most one link between any two nodes.
-  bool IsSimple() const { return simple_; }
-
-  const GraphStorage* graph_storage() const { return graph_storage_; }
-
- private:
-  void PopulateAdjacencyList();
-
-  // The graph's adjacency list.
-  net::AdjacencyList adjacency_list_;
-
-  // True if there are no multiple edges between any two nodes.
-  bool simple_;
-
-  const GraphStorage* graph_storage_;
-};
-
 // Configuration for a DFS.
 struct DFSConfig {
   bool simple = true;
@@ -290,8 +216,8 @@ class SubGraph {
  public:
   using PathCallback = std::function<void(std::unique_ptr<Walk>)>;
 
-  SubGraph(const DirectedGraph* parent, const ConstraintSet* constraints)
-      : parent_(parent), constraints_(constraints) {}
+  SubGraph(const GraphStorage* storage, const ConstraintSet* constraints)
+      : storage_(storage), constraints_(constraints) {}
 
   // Calls a callback with all paths between a source and a destination.
   void Paths(GraphNodeIndex src, GraphNodeIndex dst, PathCallback path_callback,
@@ -304,7 +230,7 @@ class SubGraph {
   std::unique_ptr<Walk> ShortestPath(GraphNodeIndex src,
                                      GraphNodeIndex dst) const;
 
-  const DirectedGraph* parent() const { return parent_; }
+  const GraphStorage* storage() const { return storage_; }
 
   const ConstraintSet* constraints() const { return constraints_; }
 
@@ -318,7 +244,7 @@ class SubGraph {
                                GraphNodeSet* nodes_seen) const;
 
   // The complete graph.
-  const DirectedGraph* parent_;
+  const GraphStorage* storage_;
 
   // Nodes/links to exclude.
   const ConstraintSet* constraints_;
@@ -394,7 +320,7 @@ class KShortestPathsGenerator {
       : src_(src),
         dst_(dst),
         constraints_(sub_graph.constraints()->SanitizeConstraints(src, dst)),
-        graph_(sub_graph.parent()) {}
+        storage_(sub_graph.storage()) {}
 
   // Returns the Kth shortest path. The path is owned by this object.
   const Walk* KthShortestPathOrNull(size_t k);
@@ -404,7 +330,7 @@ class KShortestPathsGenerator {
 
   size_t k() const { return k_paths_.size(); }
 
-  const DirectedGraph* graph() const { return graph_; }
+  const GraphStorage* graph() const { return storage_; }
 
  private:
   using PathAndStartIndex = std::pair<std::unique_ptr<Walk>, size_t>;
@@ -451,7 +377,7 @@ class KShortestPathsGenerator {
   const ConstraintSet constraints_;
 
   // The graph.
-  const DirectedGraph* graph_;
+  const GraphStorage* storage_;
 
   // State for the SP calls.
   SubGraphShortestPathState sp_state_;
