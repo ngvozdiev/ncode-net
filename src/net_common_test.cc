@@ -103,7 +103,8 @@ TEST_F(GraphStorageTest, AdjList) {
 
   ASSERT_EQ(1ul, neighbor_links.size());
   ASSERT_EQ(link_index, neighbor_links[0].link_index);
-  ASSERT_FALSE(storage.AdjacencyList().GetNeighbors(dst_index).empty());
+  ASSERT_FALSE(storage.AdjacencyList().GetNeighbors(src_index).empty());
+  ASSERT_TRUE(storage.AdjacencyList().GetNeighbors(dst_index).empty());
 }
 
 TEST_F(GraphStorageTest, LinkToString) {

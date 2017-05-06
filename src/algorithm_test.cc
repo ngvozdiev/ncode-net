@@ -178,10 +178,10 @@ TEST_F(FourEdges, VisitConstraintsMetThree) {
   constraints.AddToVisitSet({N("C")});
 
   ASSERT_EQ(1ul, constraints.MinVisit(P("[A->D]"), storage_));
-  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B]"), storage_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), storage_));
   ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C]"), storage_));
   ASSERT_EQ(0ul, constraints.MinVisit(P("[B->C]"), storage_));
-  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->B, B->C, C->D]"), storage_));
+  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C, C->D]"), storage_));
 }
 
 TEST_F(FourEdges, ShortestPath) {
