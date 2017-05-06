@@ -90,6 +90,22 @@ TEST_F(GraphStorageTest, SameLink) {
   ASSERT_EQ(link, link_two);
 }
 
+TEST_F(GraphStorageTest, AdjList) {
+  GraphBuilder builder(false);
+  builder.AddLink(link_base_);
+  GraphStorage storage(builder);
+
+  GraphNodeIndex src_index = storage.NodeFromStringOrDie(kSrc);
+  GraphNodeIndex dst_index = storage.NodeFromStringOrDie(kDst);
+  GraphLinkIndex link_index = storage.LinkOrDie(kSrc, kDst);
+  const std::vector<AdjacencyList::LinkInfo>& neighbor_links =
+      storage.AdjacencyList().GetNeighbors(src_index);
+
+  ASSERT_EQ(1ul, neighbor_links.size());
+  ASSERT_EQ(link_index, neighbor_links[0].link_index);
+  ASSERT_FALSE(storage.AdjacencyList().GetNeighbors(dst_index).empty());
+}
+
 TEST_F(GraphStorageTest, LinkToString) {
   GraphBuilder builder(false);
   builder.AddLink(link_base_);

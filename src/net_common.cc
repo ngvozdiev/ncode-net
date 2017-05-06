@@ -170,6 +170,7 @@ std::unique_ptr<GraphStorage> GraphStorage::ClusterNodes(
         clustered_link_index);
   }
 
+  new_storage->PopulateAdjacencyList();
   return new_storage;
 }
 
@@ -202,6 +203,8 @@ GraphStorage::GraphStorage(const GraphBuilder& graph_builder) {
     GraphLinkIndex index = link_store_.MoveItem(std::move(link_ptr));
     links_[src_id][dst_id].emplace_back(index);
   }
+
+  PopulateAdjacencyList();
 }
 
 bool HasDuplicateLinks(const Links& links) {
@@ -456,6 +459,22 @@ bool GraphStorage::IsInWalks(const std::string& needle,
   }
 
   return false;
+}
+
+void GraphStorage::PopulateAdjacencyList() {
+  simple_ = true;
+  for (GraphLinkIndex link : AllLinks()) {
+    const GraphLink* link_ptr = GetLink(link);
+    GraphNodeIndex src = link_ptr->src();
+    GraphNodeIndex dst = link_ptr->dst();
+    for (const auto& link_info : adjacency_list_.GetNeighbors(src)) {
+      if (link_info.dst_index == dst) {
+        simple_ = false;
+      }
+    }
+
+    adjacency_list_.AddLink(link, src, dst, link_ptr->delay());
+  }
 }
 
 const FiveTuple FiveTuple::kDefaultTuple = {};
