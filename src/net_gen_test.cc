@@ -1,13 +1,12 @@
 #include "net_gen.h"
 
-#include <google/protobuf/repeated_field.h>
-#include <ncode/ncode_common/strutil.h>
 #include <stddef.h>
 #include <algorithm>
 #include <set>
 #include <string>
 
 #include "gtest/gtest.h"
+#include "ncode_common/src/strutil.h"
 
 namespace nc {
 namespace net {

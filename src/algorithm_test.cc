@@ -1,6 +1,5 @@
 #include "algorithm.h"
 
-#include <ncode/ncode_common/perfect_hash.h>
 #include <chrono>
 #include <initializer_list>
 #include <vector>

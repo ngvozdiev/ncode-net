@@ -45,9 +45,10 @@ endif()
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_extensions)
 find_package(PCAP REQUIRED)
-find_package(NCodeCommon REQUIRED)
+include_directories(${PCAP_INCLUDE_DIR})
 
-include_directories(${PCAP_INCLUDE_DIR} ${CMAKE_BINARY_DIR})
+add_subdirectory(external/ncode_common)
+include_directories(${CMAKE_SOURCE_DIR}/external)
 
 ################################
 # Network-releated stuff

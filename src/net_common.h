@@ -1,9 +1,6 @@
 #ifndef NCODE_NET_COMMON_H
 #define NCODE_NET_COMMON_H
 
-#include <ncode/ncode_common/common.h>
-#include <ncode/ncode_common/logging.h>
-#include <ncode/ncode_common/perfect_hash.h>
 #include <stddef.h>
 #include <cassert>
 #include <cstdint>
@@ -13,6 +10,10 @@
 #include <string>
 #include <vector>
 #include <chrono>
+
+#include "ncode_common/src/common.h"
+#include "ncode_common/src/logging.h"
+#include "ncode_common/src/perfect_hash.h"
 
 namespace nc {
 namespace net {

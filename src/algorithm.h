@@ -498,7 +498,7 @@ class DisjunctKShortestPathsGenerator {
   std::vector<const Walk*> k_paths_;
 };
 
+}  // namespace net
 }  // namespace nc
-}  // namespace ncode
 
 #endif

@@ -1,12 +1,13 @@
 #include "pcap.h"
 
-#include <ncode/ncode_common/common.h>
-#include <ncode/ncode_common/logging.h>
-#include <ncode/ncode_common/substitute.h>
 #include <netinet/in.h>
 #include <pcap/pcap.h>
 #include <poll.h>
 #include <mutex>
+
+#include "ncode_common/src/common.h"
+#include "ncode_common/src/logging.h"
+#include "ncode_common/src/substitute.h"
 
 namespace nc {
 namespace pcap {

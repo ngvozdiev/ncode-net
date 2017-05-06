@@ -1,8 +1,6 @@
 #include "net_common.h"
 
 #include <arpa/inet.h>
-#include <ncode/ncode_common/map_util.h>
-#include <ncode/ncode_common/substitute.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <algorithm>
@@ -14,6 +12,9 @@
 #include <sstream>
 #include <tuple>
 #include <utility>
+
+#include "ncode_common/src/map_util.h"
+#include "ncode_common/src/substitute.h"
 
 namespace nc {
 namespace net {

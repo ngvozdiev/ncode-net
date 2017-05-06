@@ -1,7 +1,5 @@
 #include "net_gen.h"
 
-#include <ncode/ncode_common/logging.h>
-#include <ncode/ncode_common/strutil.h>
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -13,6 +11,7 @@
 #include <vector>
 
 #include "net_common.h"
+#include "ncode_common/src/strutil.h"
 
 namespace nc {
 namespace net {

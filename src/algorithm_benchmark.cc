@@ -1,20 +1,12 @@
 #include <chrono>
-#include <ncode/ncode_common/substitute.h>
 
 #include "algorithm.h"
 #include "net_common.h"
 #include "net_gen.h"
+#include "ncode_common/src/substitute.h"
 
 using namespace nc;
 using namespace std::chrono;
-
-static void TimeMs(const std::string& msg, std::function<void()> f) {
-  auto start = high_resolution_clock::now();
-  f();
-  auto end = high_resolution_clock::now();
-  auto duration = duration_cast<milliseconds>(end - start);
-  LOG(INFO) << msg << ": " << duration.count() << "ms";
-}
 
 std::vector<net::GraphNodeSet> RandomSample(const net::GraphStorage& graph,
                                             size_t count, std::mt19937* rnd) {

@@ -1,11 +1,11 @@
 #include "net_common.h"
 
-#include <ncode/ncode_common/substitute.h>
 #include <limits>
 #include <utility>
 
 #include "gtest/gtest.h"
 #include "net_gen.h"
+#include "ncode_common/src/substitute.h"
 
 namespace nc {
 namespace net {

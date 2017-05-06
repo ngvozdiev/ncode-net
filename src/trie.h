@@ -1,11 +1,10 @@
 #ifndef NCODE_NET_TRIE_H
 #define NCODE_NET_TRIE_H
 
-#include <ncode/ncode_common/common.h>
-#include <ncode/ncode_common/substitute.h>
-#include <ncode/ncode_common/stats.h>
-#include <ncode/ncode_common/logging.h>
-#include <ncode/ncode_common/perfect_hash.h>
+#include "ncode_common/src/common.h"
+#include "ncode_common/src/logging.h"
+#include "ncode_common/src/stats.h"
+#include "ncode_common/src/substitute.h"
 
 namespace nc {
 namespace net {
