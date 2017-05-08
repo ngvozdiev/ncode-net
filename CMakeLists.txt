@@ -1,7 +1,12 @@
 cmake_minimum_required(VERSION 2.8.7)
 
-project(NCodeNet)
+# If there is already a target called ncode_net someone has already
+# added this project. Will ignore.
+if(TARGET ncode_net)
+  return()
+endif(TARGET ncode_net)
 
+project(NCodeNet)
 option(NCODE_NET_DISABLE_TESTS "If tests should be compiled or not" ON)
 option(NCODE_NET_DISABLE_BENCHMARKS "If benchmarks should be compiled or not" ON)
 option(NCODE_NET_DEBUG "A debug build" OFF)
@@ -19,13 +24,8 @@ if (NCODE_NET_TSAN)
    set(NCODE_NET_BASE_LD_FLAGS "${NCODE_NET_BASE_LD_FLAGS} -fsanitize=thread")
 endif()
 
-if(APPLE)
-elseif(UNIX)
-  set(NOCDE_NET_BASE_FLAGS "${NCODE_NET_BASE_FLAGS} -pthread")
-endif()
-
 if (NCODE_NET_DEBUG)
-  set(NCODE_NET_BASE_FLAGS "${NCODE_NET_BASE_FLAGS} -O0 -fno-omit-frame-pointer --coverage")
+  set(NCODE_NET_BASE_FLAGS "${NCODE_NET_BASE_FLAGS} -O0 -fno-omit-frame-pointer")
 else()
   set(NCODE_NET_BASE_FLAGS "${NCODE_NET_BASE_FLAGS} -O3 -march=native -DNDEBUG")   
 endif()
@@ -50,11 +50,8 @@ include_directories(${PCAP_INCLUDE_DIR})
 add_subdirectory(external/ncode_common)
 include_directories(${CMAKE_SOURCE_DIR}/external)
 
-################################
-# Network-releated stuff
-################################
-set(NET_HEADER_FILES src/net_common.h src/net_gen.h src/pcap.h src/algorithm.h src/trie.h ${PROTO_NET_HDRS})
-add_library(ncode_net SHARED src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc ${PROTO_NET_SRCS} ${NET_HEADER_FILES})
+set(NET_HEADER_FILES src/net_common.h src/net_gen.h src/pcap.h src/algorithm.h src/trie.h)
+add_library(ncode_net STATIC src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc ${NET_HEADER_FILES})
 target_link_libraries(ncode_net ${PCAP_LIBRARY} ncode_common)
 
 if (NOT NCODE_NET_DISABLE_TESTS)
@@ -68,10 +65,3 @@ if (NOT NCODE_NET_DISABLE_BENCHMARKS)
   add_executable(net_algorithm_benchmark src/algorithm_benchmark.cc)
   target_link_libraries(net_algorithm_benchmark ncode_net)
 endif()
-
-INSTALL(TARGETS ncode_net
-  DESTINATION "lib")
-
-INSTALL (
-  FILES ${NET_HEADER_FILES}
-  DESTINATION include/ncode/ncode_net)
