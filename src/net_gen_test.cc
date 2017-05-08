@@ -145,5 +145,39 @@ TEST(Random, Random) {
   ASSERT_NEAR(2000, mean_bw, 1000);
 }
 
+TEST(Load, Repetita) {
+  std::string test_topology =
+      "NODES 3\n"
+      "label x y\n"
+      "0_UNIBRAW 1.0 2.0\n"
+      "2_KEIO 3.0 4.0\n"
+      "7_ITB 5.0 6.0\n"
+      "EDGES 4\n"
+      "\n"
+      "\n"
+      "label src dest weight bw delay\n"
+      "edge_0 0 1 10 1000000 10\n"
+      "edge_1 1 0 10 1000000 10\n"
+      "edge_10 2 1 10 1000000 10\n"
+      "edge_11 1 2 10 1000000 10";
+
+  std::map<std::string, std::pair<double, double>> locations;
+  GraphBuilder builder = LoadRepetita(test_topology, &locations);
+
+  ASSERT_EQ(4ul, builder.links().size());
+  ASSERT_EQ("0_UNIBRAW_0", builder.links().front().src_id());
+  ASSERT_EQ("2_KEIO_1", builder.links().front().dst_id());
+  ASSERT_EQ(Bandwidth::FromKBitsPerSecond(1000000),
+            builder.links().front().bandwidth());
+  ASSERT_EQ(microseconds(10), builder.links().front().delay());
+  ASSERT_EQ("7_ITB_2", builder.links().back().dst_id());
+
+  std::map<std::string, std::pair<double, double>> model_locations;
+  model_locations["0_UNIBRAW_0"] = {1.0, 2.0};
+  model_locations["2_KEIO_1"] = {3.0, 4.0};
+  model_locations["7_ITB_2"] = {5.0, 6.0};
+  ASSERT_EQ(model_locations, locations);
+}
+
 }  // namespace net
 }  // namespace ncode

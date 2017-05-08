@@ -53,6 +53,18 @@ GraphBuilder GenerateRandom(size_t n, double edge_prob, Delay delay_min,
 // A simple Braess paradox-like topology used for testing.
 GraphBuilder GenerateBraess(Bandwidth bw);
 
+// Loads a topology in the format used by
+// https://bitbucket.org/StevenGay/repetita/src. The first line of the file is
+// "NODES XX" followed by a comment line and XX lines for each of the nodes in
+// the graph. Each node line is of the format <node_name> <x> <y> where x and y
+// are the x,y coordinates of the nodes. The nodes section is followed by and
+// empty line and "EDGES XX" on a new line. A comment line is next, followed by
+// for each edge "<label> <src> <dst> <weight> <bw> <delay>". The bandwidth is
+// in kbps and the delay in microseconds.
+GraphBuilder LoadRepetita(
+    const std::string& topology_string,
+    std::map<std::string, std::pair<double, double>>* locations = nullptr);
+
 }  // namespace net
 }  // namespace ncode
 #endif

@@ -490,5 +490,89 @@ GraphBuilder GenerateBraess(Bandwidth bw) {
   return out;
 }
 
+// Parses a line of the form <tag> <count> and returns count.
+static uint32_t ParseCountOrDie(const std::string& tag,
+                                const std::string& line) {
+  std::vector<std::string> line_split = Split(line, " ");
+  CHECK(line_split.size() == 2) << line;
+  CHECK(line_split[0] == tag) << line_split[0] << " vs " << tag;
+
+  uint32_t count;
+  CHECK(safe_strtou32(line_split[1], &count));
+  return count;
+}
+
+GraphBuilder LoadRepetita(
+    const std::string& topology_string,
+    std::map<std::string, std::pair<double, double>>* locations) {
+  std::vector<std::string> all_lines = Split(topology_string, "\n");
+  auto it = all_lines.begin();
+
+  const std::string& nodes_line = *it;
+  uint32_t num_nodes = ParseCountOrDie("NODES", nodes_line);
+
+  // Skip free form line.
+  ++it;
+
+  std::vector<std::string> nodes;
+  for (uint32_t i = 0; i < num_nodes; ++i) {
+    ++it;
+
+    std::vector<std::string> line_split = Split(*it, " ");
+    CHECK(line_split.size() == 3);
+
+    const std::string& node_id = StrCat(line_split[0], "_", i);
+    nodes.emplace_back(node_id);
+
+    if (locations == nullptr) {
+      continue;
+    }
+
+    double x;
+    double y;
+    CHECK(safe_strtod(line_split[1], &x));
+    CHECK(safe_strtod(line_split[2], &y));
+
+    (*locations)[node_id] = {x, y};
+  }
+
+  // Skip line.
+  ++it;
+
+  const std::string& edges_line = *it;
+  uint32_t num_edges = ParseCountOrDie("EDGES", edges_line);
+
+  // Skip free form line.
+  ++it;
+
+  GraphBuilder builder;
+  for (uint32_t i = 0; i < num_edges; ++i) {
+    ++it;
+    CHECK(it != all_lines.end());
+
+    std::vector<std::string> line_split = Split(*it, " ");
+    CHECK(line_split.size() == 6);
+
+    uint32_t src_index;
+    uint32_t dst_index;
+    double bw_kbps;
+    double delay_microseconds;
+
+    CHECK(safe_strtou32(line_split[1], &src_index));
+    CHECK(safe_strtou32(line_split[2], &dst_index));
+    CHECK(safe_strtod(line_split[4], &bw_kbps));
+    CHECK(safe_strtod(line_split[5], &delay_microseconds));
+    CHECK(src_index < nodes.size());
+    CHECK(dst_index < nodes.size());
+
+    builder.AddLink(
+        {nodes[src_index], nodes[dst_index],
+         Bandwidth::FromKBitsPerSecond(bw_kbps),
+         std::chrono::microseconds(static_cast<uint64_t>(delay_microseconds))});
+  }
+
+  return builder;
+}
+
 }  // namespace net
 }  // namespace ncode
