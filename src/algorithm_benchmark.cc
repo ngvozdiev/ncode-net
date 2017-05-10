@@ -76,7 +76,6 @@ static double Compare(const std::vector<std::unique_ptr<net::Walk>>& paths_one,
     }
 
     double delta = std::abs(ls_one->delay().count() - ls_two->delay().count());
-
     total_delta += delta;
   }
 
@@ -133,11 +132,9 @@ milliseconds SinglePassSingleConstraint(const net::GraphStorage& storage,
   std::vector<const net::Walk*> paths;
   std::vector<std::unique_ptr<net::Walk>> all_paths;
 
-  net::SubGraph sub_graph(&storage, &constraints);
-  sub_graph.Paths(src_node,
-                  dst_node, [&all_paths](std::unique_ptr<net::Walk> walk) {
-                    all_paths.emplace_back(std::move(walk));
-                  }, {});
+  Paths(src_node, dst_node, [&all_paths](std::unique_ptr<net::Walk> walk) {
+    all_paths.emplace_back(std::move(walk));
+  }, storage, constraints);
   std::sort(all_paths.begin(), all_paths.end(),
             [](const std::unique_ptr<net::Walk>& lhs,
                const std::unique_ptr<net::Walk>& rhs) {
@@ -145,7 +142,7 @@ milliseconds SinglePassSingleConstraint(const net::GraphStorage& storage,
             });
 
   auto start = high_resolution_clock::now();
-  net::KShortestPathsGenerator ksp(src_node, dst_node, sub_graph);
+  net::KShortestPathsGenerator ksp(src_node, dst_node, storage, constraints);
   for (size_t i = 0; i < count; ++i) {
     const net::Walk* p = ksp.KthShortestPathOrNull(i);
     if (p != nullptr) {

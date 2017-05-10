@@ -37,6 +37,11 @@ void ConstraintSet::AddToVisitSet(const GraphNodeSet& set) {
   }
 }
 
+void ExclusionSet::AddAll(const ExclusionSet& other) {
+  links_to_exclude_.InsertAll(other.links_to_exclude_);
+  nodes_to_exclude_.InsertAll(other.nodes_to_exclude_);
+}
+
 size_t ConstraintSet::MinVisit(const Links& links,
                                const GraphStorage& graph_storage) const {
   int current_index = -1;
@@ -74,6 +79,51 @@ size_t ConstraintSet::MinVisit(const Links& links,
   }
 
   return current_index + 1;
+}
+
+std::vector<GraphNodeIndex> ConstraintSet::Waypoints(
+    const Links& links, const GraphStorage& graph_storage) const {
+  std::vector<GraphNodeIndex> out;
+  if (links.empty()) {
+    return {};
+  }
+
+  int last_i = -1;
+  const GraphLink* link_ptr = graph_storage.GetLink(links.front());
+  GraphNodeIndex path_src = link_ptr->src();
+  if (node_to_visit_index_.HasValue(path_src)) {
+    int i = node_to_visit_index_.GetValueOrDie(path_src);
+    CHECK(i >= last_i);
+    if (last_i != i) {
+      out.emplace_back(path_src);
+      last_i = i;
+    }
+  }
+
+  for (GraphLinkIndex link : links) {
+    const GraphLink* link_ptr = graph_storage.GetLink(link);
+    GraphNodeIndex dst = link_ptr->dst();
+
+    if (node_to_visit_index_.HasValue(dst)) {
+      int i = node_to_visit_index_.GetValueOrDie(dst);
+      CHECK(i >= last_i);
+      if (last_i != i) {
+        out.emplace_back(dst);
+        last_i = i;
+      }
+    }
+  }
+
+  return out;
+}
+
+const GraphNodeSet* ConstraintSet::FindSetToVisitOrNull(
+    const GraphNodeIndex node) const {
+  if (!node_to_visit_index_.HasValue(node)) {
+    return nullptr;
+  }
+
+  return &(to_visit_[node_to_visit_index_[node]]);
 }
 
 ConstraintSet ConstraintSet::SanitizeConstraints(GraphNodeIndex src,
@@ -118,29 +168,19 @@ std::string ConstraintSet::ToString(const GraphStorage& storage) const {
                     Join(visit_constraints, "->"));
 }
 
-void SubGraph::Paths(GraphNodeIndex src, GraphNodeIndex dst,
-                     PathCallback path_callback,
-                     const DFSConfig& config) const {
-  Delay total_distance = Delay::zero();
-  GraphLinkSet links_seen;
-  GraphNodeSet nodes_seen;
-  Links scratch_path;
-  PathsRecursive(config, src, dst, path_callback, &links_seen, &nodes_seen,
-                 &scratch_path, &total_distance);
-}
-
-void SubGraph::PathsRecursive(const DFSConfig& config, GraphNodeIndex at,
-                              GraphNodeIndex dst, PathCallback path_callback,
-                              GraphLinkSet* links_seen,
-                              GraphNodeSet* nodes_seen, Links* current,
-                              Delay* total_distance) const {
+static void PathsRecursive(
+    const DFSConfig& config, GraphNodeIndex at, GraphNodeIndex dst,
+    std::function<void(std::unique_ptr<Walk>)> path_callback,
+    const GraphStorage& graph, const ConstraintSet& constraints,
+    GraphLinkSet* links_seen, GraphNodeSet* nodes_seen, Links* current,
+    Delay* total_distance) {
   if (current->size() > config.max_hops) {
     return;
   }
 
   if (at == dst) {
-    size_t min_v = constraints_->MinVisit(*current, *storage_);
-    if (min_v != constraints_->to_visit().size()) {
+    size_t min_v = constraints.MinVisit(*current, graph);
+    if (min_v != constraints.to_visit().size()) {
       return;
     }
 
@@ -154,7 +194,7 @@ void SubGraph::PathsRecursive(const DFSConfig& config, GraphNodeIndex at,
     return;
   }
 
-  const AdjacencyList& adjacency_list = storage_->AdjacencyList();
+  const AdjacencyList& adjacency_list = graph.AdjacencyList();
   const std::vector<AdjacencyList::LinkInfo>& outgoing_links =
       adjacency_list.GetNeighbors(at);
 
@@ -167,12 +207,12 @@ void SubGraph::PathsRecursive(const DFSConfig& config, GraphNodeIndex at,
 
   for (const AdjacencyList::LinkInfo& out_link_info : outgoing_links) {
     GraphLinkIndex link_index = out_link_info.link_index;
-    if (constraints_->ShouldExcludeLink(link_index)) {
+    if (constraints.ShouldExcludeLink(link_index)) {
       continue;
     }
 
     GraphNodeIndex next_hop = out_link_info.dst_index;
-    if (constraints_->ShouldExcludeNode(next_hop)) {
+    if (constraints.ShouldExcludeNode(next_hop)) {
       continue;
     }
 
@@ -185,8 +225,8 @@ void SubGraph::PathsRecursive(const DFSConfig& config, GraphNodeIndex at,
 
     current->push_back(link_index);
     *total_distance += out_link_info.delay;
-    PathsRecursive(config, next_hop, dst, path_callback, links_seen, nodes_seen,
-                   current, total_distance);
+    PathsRecursive(config, next_hop, dst, path_callback, graph, constraints,
+                   links_seen, nodes_seen, current, total_distance);
     *total_distance -= out_link_info.delay;
     current->pop_back();
 
@@ -200,29 +240,50 @@ void SubGraph::PathsRecursive(const DFSConfig& config, GraphNodeIndex at,
   }
 }
 
-void SubGraph::ReachableNodesRecursive(GraphNodeIndex at,
-                                       GraphNodeSet* nodes_seen) const {
+void Paths(GraphNodeIndex src, GraphNodeIndex dst,
+           std::function<void(std::unique_ptr<Walk>)> path_callback,
+           const GraphStorage& graph, const ConstraintSet& constraints,
+           const DFSConfig& config) {
+  Delay total_distance = Delay::zero();
+  GraphLinkSet links_seen;
+  GraphNodeSet nodes_seen;
+  Links scratch_path;
+  PathsRecursive(config, src, dst, path_callback, graph, constraints,
+                 &links_seen, &nodes_seen, &scratch_path, &total_distance);
+}
+
+static void ReachableNodesRecursive(GraphNodeIndex at,
+                                    const GraphStorage& graph,
+                                    const ExclusionSet& exclusion_set,
+                                    GraphNodeSet* nodes_seen) {
   if (nodes_seen->Contains(at)) {
     return;
   }
   nodes_seen->Insert(at);
 
-  const AdjacencyList& adjacency_list = storage_->AdjacencyList();
+  const AdjacencyList& adjacency_list = graph.AdjacencyList();
   const std::vector<AdjacencyList::LinkInfo>& outgoing_links =
       adjacency_list.GetNeighbors(at);
 
   for (const AdjacencyList::LinkInfo& out_link_info : outgoing_links) {
-    if (constraints_->ShouldExcludeLink(out_link_info.link_index)) {
+    if (exclusion_set.ShouldExcludeLink(out_link_info.link_index)) {
       continue;
     }
 
     GraphNodeIndex next_hop = out_link_info.dst_index;
-    if (constraints_->ShouldExcludeNode(next_hop)) {
+    if (exclusion_set.ShouldExcludeNode(next_hop)) {
       continue;
     }
 
-    ReachableNodesRecursive(next_hop, nodes_seen);
+    ReachableNodesRecursive(next_hop, graph, exclusion_set, nodes_seen);
   }
+}
+
+GraphNodeSet ReachableNodes(GraphNodeIndex src, const GraphStorage& graph,
+                            const ExclusionSet& exclusion_set) {
+  GraphNodeSet set;
+  ReachableNodesRecursive(src, graph, exclusion_set, &set);
+  return set;
 }
 
 static Links RecoverPath(
@@ -450,8 +511,7 @@ static std::unique_ptr<Walk> ShortestPathStatic(
     const GraphNodeIndex src, const GraphNodeIndex dst,
     const GraphNodeSet& nodes_to_avoid, const GraphLinkSet& links_to_avoid,
     const ExclusionSet& exclusion_set, VisitList::const_iterator to_visit_from,
-    VisitList::const_iterator to_visit_to, const AdjacencyList& adj_list,
-    SubGraphShortestPathState* sp_state) {
+    VisitList::const_iterator to_visit_to, const AdjacencyList& adj_list) {
   size_t to_visit_count = std::distance(to_visit_from, to_visit_to);
   if (to_visit_count == 0) {
     net::ShortestPath sp_tree(src, {dst}, exclusion_set, adj_list,
@@ -459,29 +519,24 @@ static std::unique_ptr<Walk> ShortestPathStatic(
     return sp_tree.GetPath(dst);
   }
 
-  // Clean up previous state.
-  sp_state->Clear();
-
   // Nodes to exclude.
-  GraphNodeSet& to_exclude = sp_state->to_exclude;
+  GraphNodeSet to_exclude;
 
   // The adjacency list for the graph that is created from shortest paths from
   // each node in 'to_visit' to destinations.
-  AdjacencyList& path_graph_adj_list = sp_state->path_graph_adj_list;
+  AdjacencyList path_graph_adj_list;
 
   // Generates sequential link indices.
   size_t path_graph_link_index_gen = -1;
 
   // Shortest path trees.
-  GraphNodeMap<std::unique_ptr<net::ShortestPath>>& sp_trees =
-      sp_state->sp_trees;
+  GraphNodeMap<std::unique_ptr<net::ShortestPath>> sp_trees;
 
   // Maps a pair of src, dst with the link that represents the shortest path
   // between them in the new graph. The link index is not into the original
   // graph (from graph_storage) but one of the ones generated by
   // path_graph_link_index_gen.
-  GraphLinkMap<std::pair<GraphNodeIndex, GraphNodeIndex>>& link_map =
-      sp_state->link_map;
+  GraphLinkMap<std::pair<GraphNodeIndex, GraphNodeIndex>> link_map;
 
   // Will assume that the front/back do not contain the src/dst, as it makes it
   // easier to reason about order. This is enforced elsewhere.
@@ -576,17 +631,16 @@ static std::unique_ptr<Walk> ShortestPathStatic(
   return make_unique<Walk>(final_path, total_delay);
 }
 
-std::unique_ptr<Walk> SubGraph::ShortestPath(GraphNodeIndex src,
-                                             GraphNodeIndex dst) const {
-  SubGraphShortestPathState sp_state;
+std::unique_ptr<Walk> ShortestPathWithConstraints(
+    GraphNodeIndex src, GraphNodeIndex dst, const GraphStorage& graph,
+    const ConstraintSet& constraints) {
   ConstraintSet sanitized_constraints =
-      constraints_->SanitizeConstraints(src, dst);
+      constraints.SanitizeConstraints(src, dst);
 
-  return ShortestPathStatic(src, dst, {}, {},
-                            sanitized_constraints.exclusion_set(),
-                            sanitized_constraints.to_visit().begin(),
-                            sanitized_constraints.to_visit().end(),
-                            storage_->AdjacencyList(), &sp_state);
+  return ShortestPathStatic(
+      src, dst, {}, {}, sanitized_constraints.exclusion_set(),
+      sanitized_constraints.to_visit().begin(),
+      sanitized_constraints.to_visit().end(), graph.AdjacencyList());
 }
 
 std::unique_ptr<Walk> KShortestPathsGenerator::ShortestPath(
@@ -596,9 +650,9 @@ std::unique_ptr<Walk> KShortestPathsGenerator::ShortestPath(
   const VisitList& to_visit = constraints_.to_visit();
   auto start_it = std::next(to_visit.begin(), to_visit_index);
 
-  return ShortestPathStatic(
-      src, dst, nodes_to_avoid, links_to_avoid, constraints_.exclusion_set(),
-      start_it, to_visit.end(), storage_->AdjacencyList(), &sp_state_);
+  return ShortestPathStatic(src, dst, nodes_to_avoid, links_to_avoid,
+                            constraints_.exclusion_set(), start_it,
+                            to_visit.end(), storage_->AdjacencyList());
 }
 
 bool KShortestPathsGenerator::NextPath() {
@@ -730,12 +784,18 @@ void KShortestPathsGenerator::GetLinkExclusionSet(const Links& root_path,
   }
 }
 
-const Walk* DisjunctKShortestPathsGenerator::PopAndEnqueue() {
+const Walk* DisjunctKShortestPathsGenerator::PopAndEnqueue(
+    size_t* generator_index) {
   PathGenAndPath top = queue_.PopTop();
-  KShortestPathsGenerator* ksp_gen = top.generator;
+  size_t gen_i = top.generator_i;
+  if (generator_index != nullptr) {
+    *generator_index = gen_i;
+  }
+
   CHECK(top.candidate != nullptr);
   const Walk* to_return = top.candidate;
 
+  KShortestPathsGenerator* ksp_gen = ksp_generators_[gen_i].get();
   top.candidate = ksp_gen->KthShortestPathOrNull(ksp_gen->k());
   if (top.candidate != nullptr) {
     queue_.emplace(top);
@@ -744,53 +804,178 @@ const Walk* DisjunctKShortestPathsGenerator::PopAndEnqueue() {
   return to_return;
 }
 
-const Walk* DisjunctKShortestPathsGenerator::Next() {
+const Walk* DisjunctKShortestPathsGenerator::Next(size_t* generator_index) {
   if (queue_.empty()) {
     return nullptr;
   }
 
-  const Walk* to_return = PopAndEnqueue();
+  const Walk* to_return = PopAndEnqueue(generator_index);
   while (!queue_.empty() && (*queue_.top().candidate == *to_return)) {
     // Will keep popping from the queue until we get to a different path. Cannot
     // simply compare pointers, as the paths come from different generators.
-    PopAndEnqueue();
+    PopAndEnqueue(nullptr);
   }
 
   return to_return;
 }
 
-const Walk* DisjunctKShortestPathsGenerator::KthShortestPathOrNull(size_t k) {
+const Walk* DisjunctKShortestPathsGenerator::KthShortestPathOrNull(
+    size_t k, size_t* generator_index) {
   if (k < k_paths_.size()) {
-    return k_paths_[k];
+    const auto& id_and_path = k_paths_[k];
+    if (generator_index != nullptr) {
+      *generator_index = id_and_path.first;
+    }
+
+    return id_and_path.second;
   }
 
   size_t delta = k + 1 - k_paths_.size();
   for (size_t i = 0; i < delta; ++i) {
-    const Walk* next = Next();
+    size_t gen_index;
+    const Walk* next = Next(&gen_index);
     if (next == nullptr) {
       return nullptr;
     }
 
-    k_paths_.emplace_back(next);
+    if (generator_index != nullptr) {
+      *generator_index = gen_index;
+    }
+
+    k_paths_.emplace_back(gen_index, next);
   }
 
-  return k_paths_.back();
+  return k_paths_.back().second;
 }
 
 DisjunctKShortestPathsGenerator::DisjunctKShortestPathsGenerator(
-    GraphNodeIndex src, GraphNodeIndex dst,
-    const std::vector<const SubGraph*>& sub_graphs) {
-  for (const SubGraph* sub_graph : sub_graphs) {
+    GraphNodeIndex src, GraphNodeIndex dst, const GraphStorage& graph,
+    const std::vector<ConstraintSet>& constraints) {
+  for (const ConstraintSet& constraint_set : constraints) {
     ksp_generators_.emplace_back(
-        make_unique<KShortestPathsGenerator>(src, dst, *sub_graph));
+        make_unique<KShortestPathsGenerator>(src, dst, graph, constraint_set));
   }
 
-  for (auto& generator : ksp_generators_) {
+  for (size_t i = 0; i < ksp_generators_.size(); ++i) {
+    KShortestPathsGenerator* generator = ksp_generators_[i].get();
     const Walk* walk = generator->KthShortestPathOrNull(generator->k());
     if (walk != nullptr) {
-      queue_.emplace(generator.get(), walk);
+      queue_.emplace(i, walk);
     }
   }
+}
+
+static Delay DelayOrDie(
+    const GraphNodeMap<std::unique_ptr<ShortestPath>>& sp_trees,
+    GraphNodeIndex src, GraphNodeIndex dst) {
+  Delay to_return = sp_trees.GetValueOrDie(src)->GetPathDistance(dst);
+  CHECK(to_return != Delay::max());
+  return to_return;
+}
+
+// Returns the index of node that is the closest to 'to' in waypoint_list
+// starting at start_index.
+static size_t ClosestTo(
+    const GraphNodeMap<std::unique_ptr<ShortestPath>>& sp_trees,
+    const std::vector<GraphNodeIndex>& waypoint_list,
+    GraphNodeIndex new_waypoint, size_t start_index) {
+  CHECK(waypoint_list.size() > 1);
+  CHECK(start_index < waypoint_list.size() - 1);
+
+  Delay best_delta = Delay::max();
+  size_t best_i = 0;
+  for (size_t i = start_index; i < waypoint_list.size() - 1; ++i) {
+    // Delay between two consecutive waypoints.
+    Delay direct_delay =
+        DelayOrDie(sp_trees, waypoint_list[i], waypoint_list[i + 1]);
+
+    // Delay if we were to insert the waypoint between this waypoint and the
+    // next one.
+    Delay indirect_delay =
+        DelayOrDie(sp_trees, waypoint_list[i], new_waypoint) +
+        DelayOrDie(sp_trees, new_waypoint, waypoint_list[i + 1]);
+
+    CHECK(indirect_delay >= direct_delay);
+    Delay delta = indirect_delay - direct_delay;
+    if (delta < best_delta) {
+      best_delta = delta;
+      best_i = i;
+    }
+  }
+
+  return best_i;
+}
+
+// Merges the waypoints from 'to_merge' into 'current_waypoints'.
+static void Merge(const std::vector<GraphNodeIndex>& to_merge,
+                  const GraphNodeMap<std::unique_ptr<ShortestPath>>& sp_trees,
+                  std::vector<GraphNodeIndex>* current_waypoints) {
+  size_t prev_index = 0;
+  for (GraphNodeIndex waypoint_to_merge : to_merge) {
+    size_t new_index =
+        ClosestTo(sp_trees, *current_waypoints, waypoint_to_merge, prev_index);
+
+    // Will insert the waypoint right after 'new_index' and update prev_index,
+    // as all subsequent waypoints should follow this one.
+    current_waypoints->insert(
+        std::next(current_waypoints->begin(), new_index + 1),
+        waypoint_to_merge);
+    prev_index = new_index + 1;
+  }
+}
+
+// Retturns for each node the SP tree that is rooted at this node.
+static GraphNodeMap<std::unique_ptr<ShortestPath>> GetSPTrees(
+    const GraphNodeSet& nodes, const ExclusionSet& exclusion_set,
+    const AdjacencyList& adj_list) {
+  GraphNodeMap<std::unique_ptr<ShortestPath>> out;
+  for (GraphNodeIndex node : nodes) {
+    out[node] = make_unique<ShortestPath>(node, nodes, exclusion_set, adj_list);
+  }
+
+  return out;
+}
+
+std::unique_ptr<Walk> CombineWaypoints(
+    GraphNodeIndex src, GraphNodeIndex dst, const ExclusionSet& exclusion_set,
+    const AdjacencyList& adj_list,
+    const std::vector<std::vector<GraphNodeIndex>>& waypoints) {
+  CHECK(!waypoints.empty());
+
+  GraphNodeSet all_waypoints = {src, dst};
+  for (const std::vector<GraphNodeIndex>& waypoint_list : waypoints) {
+    for (GraphNodeIndex waypoint : waypoint_list) {
+      all_waypoints.Insert(waypoint);
+    }
+  }
+
+  GraphNodeMap<std::unique_ptr<ShortestPath>> sp_trees =
+      GetSPTrees(all_waypoints, exclusion_set, adj_list);
+
+  std::vector<GraphNodeIndex> current_waypoints = {src};
+  const std::vector<GraphNodeIndex>& first_waypoint_list = waypoints.front();
+  current_waypoints.insert(current_waypoints.end(), first_waypoint_list.begin(),
+                           first_waypoint_list.end());
+  current_waypoints.emplace_back(dst);
+
+  for (size_t i = 1; i < waypoints.size(); ++i) {
+    Merge(waypoints[i], sp_trees, &current_waypoints);
+  }
+
+  Links links_in_path;
+  Delay total_delay = Delay::zero();
+  for (size_t i = 0; i < current_waypoints.size() - 1; ++i) {
+    GraphNodeIndex from = current_waypoints[i];
+    GraphNodeIndex to = current_waypoints[i + 1];
+
+    std::unique_ptr<Walk> sub_path = sp_trees.GetValueOrDie(from)->GetPath(to);
+    total_delay += sub_path->delay();
+
+    links_in_path.insert(links_in_path.end(), sub_path->links().begin(),
+                         sub_path->links().end());
+  }
+
+  return make_unique<Walk>(links_in_path, total_delay);
 }
 
 }  // namespace nc

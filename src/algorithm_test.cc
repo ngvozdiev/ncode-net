@@ -24,24 +24,29 @@ TEST(SimpleGraph, DoubleEdge) {
 
 class Base {
  protected:
-  Base(const GraphBuilder& builder) : storage_(builder) {}
+  Base(const GraphBuilder& builder) : graph_(builder) {}
 
   // Returns the path described by a string.
   Links P(const std::string& path_string) {
-    return storage_.WalkFromStringOrDie(path_string)->links();
+    std::unique_ptr<Walk> walk = graph_.WalkFromStringOrDie(path_string);
+    if (!walk) {
+      return {};
+    }
+
+    return walk->links();
   }
 
   // Returns a node.
   GraphNodeIndex N(const std::string& node) {
-    return storage_.NodeFromStringOrDie(node);
+    return graph_.NodeFromStringOrDie(node);
   }
 
   // Returns a link.
   GraphLinkIndex L(const std::string& src, const std::string& dst) {
-    return storage_.LinkOrDie(src, dst);
+    return graph_.LinkOrDie(src, dst);
   }
 
-  GraphStorage storage_;
+  GraphStorage graph_;
 };
 
 class SingleLink : public ::testing::Test, public Base {
@@ -57,19 +62,22 @@ class SingleLink : public ::testing::Test, public Base {
 
 TEST_F(SingleLink, SubGraphNoExclusion) {
   ConstraintSet constraints;
-  SubGraph sub_graph(&storage_, &constraints);
 
-  ASSERT_FALSE(sub_graph.ShortestPath(N("B"), N("A")));
-  ASSERT_EQ(P("[A->B]"), sub_graph.ShortestPath(N("A"), N("B"))->links());
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("B"), N("A"), graph_, constraints));
+  ASSERT_EQ(P("[A->B]"),
+            ShortestPathWithConstraints(N("A"), N("B"), graph_, constraints)
+                ->links());
 }
 
 TEST_F(SingleLink, SubGraph) {
   ConstraintSet constraints;
   constraints.Exclude().Links({L("A", "B")});
-  SubGraph sub_graph(&storage_, &constraints);
 
-  ASSERT_FALSE(sub_graph.ShortestPath(N("B"), N("A")));
-  ASSERT_FALSE(sub_graph.ShortestPath(N("A"), N("B")));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("B"), N("A"), graph_, constraints));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("A"), N("B"), graph_, constraints));
 }
 
 class ThreeEdges : public ::testing::Test, public Base {
@@ -87,43 +95,59 @@ class ThreeEdges : public ::testing::Test, public Base {
 
 TEST_F(ThreeEdges, ShortestPath) {
   ConstraintSet constraints;
-  SubGraph sub_graph(&storage_, &constraints);
 
-  ASSERT_FALSE(sub_graph.ShortestPath(N("B"), N("A")));
-  ASSERT_EQ(P("[A->B, B->C]"), sub_graph.ShortestPath(N("A"), N("C"))->links());
-  ASSERT_EQ(P("[C->B]"), sub_graph.ShortestPath(N("C"), N("B"))->links());
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("B"), N("A"), graph_, constraints));
+  ASSERT_EQ(P("[A->B, B->C]"),
+            ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[C->B]"),
+            ShortestPathWithConstraints(N("C"), N("B"), graph_, constraints)
+                ->links());
 }
 
 TEST_F(ThreeEdges, SubGraphOne) {
   ConstraintSet constraints;
   constraints.Exclude().Links({L("A", "B")});
-  SubGraph sub_graph(&storage_, &constraints);
 
-  ASSERT_FALSE(sub_graph.ShortestPath(N("B"), N("A")));
-  ASSERT_FALSE(sub_graph.ShortestPath(N("A"), N("B")));
-  ASSERT_EQ(P("[B->C]"), sub_graph.ShortestPath(N("B"), N("C"))->links());
-  ASSERT_EQ(P("[C->B]"), sub_graph.ShortestPath(N("C"), N("B"))->links());
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("B"), N("A"), graph_, constraints));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("A"), N("B"), graph_, constraints));
+  ASSERT_EQ(P("[B->C]"),
+            ShortestPathWithConstraints(N("B"), N("C"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[C->B]"),
+            ShortestPathWithConstraints(N("C"), N("B"), graph_, constraints)
+                ->links());
 }
 
 TEST_F(ThreeEdges, SubGraphTwo) {
   ConstraintSet constraints;
   constraints.Exclude().Links({L("B", "C")});
-  SubGraph sub_graph(&storage_, &constraints);
 
-  ASSERT_FALSE(sub_graph.ShortestPath(N("A"), N("C")));
-  ASSERT_FALSE(sub_graph.ShortestPath(N("B"), N("C")));
-  ASSERT_EQ(P("[A->B]"), sub_graph.ShortestPath(N("A"), N("B"))->links());
-  ASSERT_EQ(P("[C->B]"), sub_graph.ShortestPath(N("C"), N("B"))->links());
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("B"), N("C"), graph_, constraints));
+  ASSERT_EQ(P("[A->B]"),
+            ShortestPathWithConstraints(N("A"), N("B"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[C->B]"),
+            ShortestPathWithConstraints(N("C"), N("B"), graph_, constraints)
+                ->links());
 }
 
 TEST_F(ThreeEdges, SubGraphThree) {
   ConstraintSet constraints;
   constraints.Exclude().Nodes({N("B")});
-  SubGraph sub_graph(&storage_, &constraints);
 
-  ASSERT_FALSE(sub_graph.ShortestPath(N("A"), N("C")));
-  ASSERT_FALSE(sub_graph.ShortestPath(N("B"), N("C")));
-  ASSERT_FALSE(sub_graph.ShortestPath(N("C"), N("B")));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("B"), N("C"), graph_, constraints));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("C"), N("B"), graph_, constraints));
 }
 
 class FourEdges : public ::testing::Test, public Base {
@@ -142,34 +166,34 @@ class FourEdges : public ::testing::Test, public Base {
 
 TEST_F(FourEdges, VisitConstraintsMet) {
   ConstraintSet constraints;
-  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]"), storage_));
+  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]"), graph_));
 
   constraints.AddToVisitSet({N("B")});
-  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]"), storage_));
-  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), storage_));
-  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B, B->C]"), storage_));
+  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]"), graph_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), graph_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B, B->C]"), graph_));
 
   constraints.AddToVisitSet({N("C")});
-  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]"), storage_));
-  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), storage_));
-  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C]"), storage_));
+  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]"), graph_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), graph_));
+  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C]"), graph_));
 
   constraints.AddToVisitSet({N("D")});
-  ASSERT_EQ(0ul, constraints.MinVisit({}, storage_));
-  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), storage_));
-  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C]"), storage_));
-  ASSERT_EQ(3ul, constraints.MinVisit(P("[A->B, B->C, C->D]"), storage_));
+  ASSERT_EQ(0ul, constraints.MinVisit({}, graph_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), graph_));
+  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C]"), graph_));
+  ASSERT_EQ(3ul, constraints.MinVisit(P("[A->B, B->C, C->D]"), graph_));
 }
 
 TEST_F(FourEdges, VisitConstraintsMetTwo) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("B"), N("C")});
 
-  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]"), storage_));
-  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), storage_));
-  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B, B->C]"), storage_));
-  ASSERT_EQ(1ul, constraints.MinVisit(P("[B->C]"), storage_));
-  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B, B->C, C->D]"), storage_));
+  ASSERT_EQ(0ul, constraints.MinVisit(P("[A->D]"), graph_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), graph_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B, B->C]"), graph_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[B->C]"), graph_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B, B->C, C->D]"), graph_));
 }
 
 TEST_F(FourEdges, VisitConstraintsMetThree) {
@@ -177,45 +201,90 @@ TEST_F(FourEdges, VisitConstraintsMetThree) {
   constraints.AddToVisitSet({N("A")});
   constraints.AddToVisitSet({N("C")});
 
-  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->D]"), storage_));
-  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), storage_));
-  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C]"), storage_));
-  ASSERT_EQ(0ul, constraints.MinVisit(P("[B->C]"), storage_));
-  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C, C->D]"), storage_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->D]"), graph_));
+  ASSERT_EQ(1ul, constraints.MinVisit(P("[A->B]"), graph_));
+  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C]"), graph_));
+  ASSERT_EQ(0ul, constraints.MinVisit(P("[B->C]"), graph_));
+  ASSERT_EQ(2ul, constraints.MinVisit(P("[A->B, B->C, C->D]"), graph_));
+}
+
+TEST_F(FourEdges, WaypointsEmpty) {
+  ConstraintSet constraints;
+  ASSERT_TRUE(constraints.Waypoints(P("[]"), graph_).empty());
+  ASSERT_TRUE(constraints.Waypoints(P("[A->B, B->C, C->D]"), graph_).empty());
+}
+
+TEST_F(FourEdges, Waypoints) {
+  ConstraintSet constraints;
+  constraints.AddToVisitSet({N("A")});
+  constraints.AddToVisitSet({N("C")});
+
+  std::vector<GraphNodeIndex> waypoints =
+      constraints.Waypoints(P("[A->B, B->C, C->D]"), graph_);
+  std::vector<GraphNodeIndex> model = {N("A"), N("C")};
+  ASSERT_EQ(model, waypoints);
+}
+
+TEST_F(FourEdges, WaypointsTwo) {
+  ConstraintSet constraints;
+  constraints.AddToVisitSet({N("A"), N("C")});
+  constraints.AddToVisitSet({N("D")});
+
+  std::vector<GraphNodeIndex> waypoints =
+      constraints.Waypoints(P("[A->B, B->C, C->D]"), graph_);
+  std::vector<GraphNodeIndex> model_one = {N("A"), N("D")};
+  std::vector<GraphNodeIndex> model_two = {N("C"), N("D")};
+  ASSERT_TRUE(model_one == waypoints || model_two == waypoints);
 }
 
 TEST_F(FourEdges, ShortestPath) {
   ConstraintSet constraints;
-  SubGraph sub_graph(&storage_, &constraints);
 
-  ASSERT_EQ(P("[A->D]"), sub_graph.ShortestPath(N("A"), N("D"))->links());
-  ASSERT_EQ(P("[B->C]"), sub_graph.ShortestPath(N("B"), N("C"))->links());
-  ASSERT_EQ(P("[A->B, B->C]"), sub_graph.ShortestPath(N("A"), N("C"))->links());
-  ASSERT_FALSE(sub_graph.ShortestPath(N("C"), N("A")));
+  ASSERT_EQ(P("[A->D]"),
+            ShortestPathWithConstraints(N("A"), N("D"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[B->C]"),
+            ShortestPathWithConstraints(N("B"), N("C"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[A->B, B->C]"),
+            ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints)
+                ->links());
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("C"), N("A"), graph_, constraints));
 }
 
 TEST_F(FourEdges, ShortestPathVisitConstraint) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("B")});
 
-  SubGraph sub_graph(&storage_, &constraints);
   ASSERT_EQ(P("[A->B, B->C, C->D]"),
-            sub_graph.ShortestPath(N("A"), N("D"))->links());
-  ASSERT_EQ(P("[B->C]"), sub_graph.ShortestPath(N("B"), N("C"))->links());
-  ASSERT_FALSE(sub_graph.ShortestPath(N("C"), N("A")));
-  ASSERT_EQ(P("[A->B, B->C]"), sub_graph.ShortestPath(N("A"), N("C"))->links());
+            ShortestPathWithConstraints(N("A"), N("D"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[B->C]"),
+            ShortestPathWithConstraints(N("B"), N("C"), graph_, constraints)
+                ->links());
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("C"), N("A"), graph_, constraints));
+  ASSERT_EQ(P("[A->B, B->C]"),
+            ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints)
+                ->links());
 }
 
 TEST_F(FourEdges, ShortestPathVisitConstraintTwoNodes) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("B"), N("C")});
 
-  SubGraph sub_graph(&storage_, &constraints);
   ASSERT_EQ(P("[A->B, B->C, C->D]"),
-            sub_graph.ShortestPath(N("A"), N("D"))->links());
-  ASSERT_EQ(P("[B->C]"), sub_graph.ShortestPath(N("B"), N("C"))->links());
-  ASSERT_FALSE(sub_graph.ShortestPath(N("C"), N("A")));
-  ASSERT_EQ(P("[A->B, B->C]"), sub_graph.ShortestPath(N("A"), N("C"))->links());
+            ShortestPathWithConstraints(N("A"), N("D"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[B->C]"),
+            ShortestPathWithConstraints(N("B"), N("C"), graph_, constraints)
+                ->links());
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("C"), N("A"), graph_, constraints));
+  ASSERT_EQ(P("[A->B, B->C]"),
+            ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints)
+                ->links());
 }
 
 TEST_F(FourEdges, ShortestPathVisitConstraintFull) {
@@ -223,11 +292,17 @@ TEST_F(FourEdges, ShortestPathVisitConstraintFull) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("A"), N("B"), N("C"), N("D")});
 
-  SubGraph sub_graph(&storage_, &constraints);
-  ASSERT_EQ(P("[A->D]"), sub_graph.ShortestPath(N("A"), N("D"))->links());
-  ASSERT_EQ(P("[B->C]"), sub_graph.ShortestPath(N("B"), N("C"))->links());
-  ASSERT_EQ(P("[A->B, B->C]"), sub_graph.ShortestPath(N("A"), N("C"))->links());
-  ASSERT_FALSE(sub_graph.ShortestPath(N("C"), N("A")));
+  ASSERT_EQ(P("[A->D]"),
+            ShortestPathWithConstraints(N("A"), N("D"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[B->C]"),
+            ShortestPathWithConstraints(N("B"), N("C"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[A->B, B->C]"),
+            ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints)
+                ->links());
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("C"), N("A"), graph_, constraints));
 }
 
 TEST_F(FourEdges, ShortestPathVisitConstraintSpecific) {
@@ -238,13 +313,17 @@ TEST_F(FourEdges, ShortestPathVisitConstraintSpecific) {
   constraints.AddToVisitSet({N("C")});
   constraints.AddToVisitSet({N("D")});
 
-  SubGraph sub_graph(&storage_, &constraints);
   ASSERT_EQ(P("[A->B, B->C, C->D]"),
-            sub_graph.ShortestPath(N("A"), N("D"))->links());
-  ASSERT_FALSE(sub_graph.ShortestPath(N("B"), N("C")));
-  ASSERT_FALSE(sub_graph.ShortestPath(N("B"), N("D")));
-  ASSERT_FALSE(sub_graph.ShortestPath(N("A"), N("C")));
-  ASSERT_FALSE(sub_graph.ShortestPath(N("C"), N("A")));
+            ShortestPathWithConstraints(N("A"), N("D"), graph_, constraints)
+                ->links());
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("B"), N("C"), graph_, constraints));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("B"), N("D"), graph_, constraints));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("C"), N("A"), graph_, constraints));
 }
 
 TEST_F(FourEdges, ShortestPathVisitConstraintSpecificTwo) {
@@ -254,13 +333,18 @@ TEST_F(FourEdges, ShortestPathVisitConstraintSpecificTwo) {
   constraints.AddToVisitSet({N("C")});
   constraints.AddToVisitSet({N("D")});
 
-  SubGraph sub_graph(&storage_, &constraints);
   ASSERT_EQ(P("[A->B, B->C, C->D]"),
-            sub_graph.ShortestPath(N("A"), N("D"))->links());
-  ASSERT_EQ(P("[B->C, C->D]"), sub_graph.ShortestPath(N("B"), N("D"))->links());
-  ASSERT_FALSE(sub_graph.ShortestPath(N("B"), N("C")));
-  ASSERT_FALSE(sub_graph.ShortestPath(N("A"), N("C")));
-  ASSERT_FALSE(sub_graph.ShortestPath(N("C"), N("A")));
+            ShortestPathWithConstraints(N("A"), N("D"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[B->C, C->D]"),
+            ShortestPathWithConstraints(N("B"), N("D"), graph_, constraints)
+                ->links());
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("B"), N("C"), graph_, constraints));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("C"), N("A"), graph_, constraints));
 }
 
 TEST_F(FourEdges, ShortestPathVisitConstraintTwoSets) {
@@ -268,36 +352,38 @@ TEST_F(FourEdges, ShortestPathVisitConstraintTwoSets) {
   constraints.AddToVisitSet({N("A"), N("D")});
   constraints.AddToVisitSet({N("B"), N("C")});
 
-  SubGraph sub_graph(&storage_, &constraints);
-
   ASSERT_EQ(P("[A->B, B->C, C->D]"),
-            sub_graph.ShortestPath(N("A"), N("D"))->links());
-  ASSERT_EQ(P("[A->B, B->C]"), sub_graph.ShortestPath(N("A"), N("C"))->links());
-  ASSERT_EQ(P("[A->B]"), sub_graph.ShortestPath(N("A"), N("B"))->links());
+            ShortestPathWithConstraints(N("A"), N("D"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[A->B, B->C]"),
+            ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints)
+                ->links());
+  ASSERT_EQ(P("[A->B]"),
+            ShortestPathWithConstraints(N("A"), N("B"), graph_, constraints)
+                ->links());
 }
 
 TEST_F(FourEdges, SubGraph) {
   ConstraintSet constraints;
   constraints.Exclude().Links({L("A", "D")});
-  SubGraph sub_graph(&storage_, &constraints);
 
   ASSERT_EQ(P("[A->B, B->C, C->D]"),
-            sub_graph.ShortestPath(N("A"), N("D"))->links());
+            ShortestPathWithConstraints(N("A"), N("D"), graph_, constraints)
+                ->links());
 }
 
 TEST_F(FourEdges, SubGraphTwo) {
   ConstraintSet constraints;
   constraints.Exclude().Links({L("A", "B")});
-  SubGraph sub_graph(&storage_, &constraints);
 
-  ASSERT_FALSE(sub_graph.ShortestPath(N("A"), N("B")));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("A"), N("B"), graph_, constraints));
 }
 
 TEST_F(FourEdges, KSPImpossible) {
   ConstraintSet constraints;
-  SubGraph sub_graph(&storage_, &constraints);
 
-  KShortestPathsGenerator ksp(N("D"), N("A"), sub_graph);
+  KShortestPathsGenerator ksp(N("D"), N("A"), graph_, constraints);
   ASSERT_EQ(nullptr, ksp.KthShortestPathOrNull(0));
   ASSERT_EQ(nullptr, ksp.KthShortestPathOrNull(1));
 }
@@ -305,9 +391,8 @@ TEST_F(FourEdges, KSPImpossible) {
 TEST_F(FourEdges, KSPConstraintImpossible) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("A")});
-  SubGraph sub_graph(&storage_, &constraints);
 
-  KShortestPathsGenerator ksp(N("C"), N("D"), sub_graph);
+  KShortestPathsGenerator ksp(N("C"), N("D"), graph_, constraints);
   ASSERT_EQ(nullptr, ksp.KthShortestPathOrNull(0));
   ASSERT_EQ(nullptr, ksp.KthShortestPathOrNull(1));
 }
@@ -332,11 +417,10 @@ TEST_F(Ring, DuplicateLink) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("C")});
 
-  SubGraph sub_graph(&storage_, &constraints);
-
   // The shortest way to get to E from A via C would repeat A->B.
   ASSERT_EQ(P("[A->B, B->C, C->D, D->A, A->B, B->E]"),
-            sub_graph.ShortestPath(N("A"), N("E"))->links());
+            ShortestPathWithConstraints(N("A"), N("E"), graph_, constraints)
+                ->links());
 }
 
 TEST_F(Ring, DuplicateLinkNoAvoid) {
@@ -344,11 +428,10 @@ TEST_F(Ring, DuplicateLinkNoAvoid) {
   constraints.Exclude().Links({L("C", "D")});
   constraints.AddToVisitSet({N("C")});
 
-  SubGraph sub_graph(&storage_, &constraints);
-
   // The second best path.
   ASSERT_EQ(P("[A->B, B->C, C->E]"),
-            sub_graph.ShortestPath(N("A"), N("E"))->links());
+            ShortestPathWithConstraints(N("A"), N("E"), graph_, constraints)
+                ->links());
 }
 
 class Braess : public ::testing::Test, public Base {
@@ -361,20 +444,18 @@ TEST_F(Braess, ShortestPathVisitConstraintDstExclude) {
   constraints.Exclude().Nodes({N("B")});
   constraints.AddToVisitSet({N("D")});
 
-  SubGraph sub_graph(&storage_, &constraints);
-
   // The shortest path from A to D is ACD which goes via the destination.
-  ASSERT_FALSE(sub_graph.ShortestPath(N("A"), N("C")));
+  ASSERT_FALSE(
+      ShortestPathWithConstraints(N("A"), N("C"), graph_, constraints));
 }
 
 TEST_F(Braess, DFS) {
   ConstraintSet constraints;
-  SubGraph sub_graph(&storage_, &constraints);
 
   std::vector<std::unique_ptr<Walk>> paths;
-  sub_graph.Paths(N("A"), N("D"), [&paths](std::unique_ptr<Walk> path) {
+  Paths(N("A"), N("D"), [&paths](std::unique_ptr<Walk> path) {
     paths.emplace_back(std::move(path));
-  }, {});
+  }, graph_, constraints);
 
   std::sort(paths.begin(), paths.end(), [](const std::unique_ptr<Walk>& lhs,
                                            const std::unique_ptr<Walk>& rhs) {
@@ -388,15 +469,14 @@ TEST_F(Braess, DFS) {
 
 TEST_F(Braess, DFSNotSimple) {
   ConstraintSet constraints;
-  SubGraph sub_graph(&storage_, &constraints);
 
   DFSConfig dfs_config;
   dfs_config.simple = false;
 
   std::vector<std::unique_ptr<Walk>> paths;
-  sub_graph.Paths(N("A"), N("D"), [&paths](std::unique_ptr<Walk> path) {
+  Paths(N("A"), N("D"), [&paths](std::unique_ptr<Walk> path) {
     paths.emplace_back(std::move(path));
-  }, dfs_config);
+  }, graph_, constraints, dfs_config);
 
   std::sort(paths.begin(), paths.end(), [](const std::unique_ptr<Walk>& lhs,
                                            const std::unique_ptr<Walk>& rhs) {
@@ -415,12 +495,11 @@ TEST_F(Braess, DFSNotSimple) {
 TEST_F(Braess, DFSConstraint) {
   ConstraintSet constraints;
   constraints.Exclude().Links({L("A", "B")});
-  SubGraph sub_graph(&storage_, &constraints);
 
   std::vector<std::unique_ptr<Walk>> paths;
-  sub_graph.Paths(N("A"), N("D"), [&paths](std::unique_ptr<Walk> path) {
+  Paths(N("A"), N("D"), [&paths](std::unique_ptr<Walk> path) {
     paths.emplace_back(std::move(path));
-  }, {});
+  }, graph_, constraints);
 
   ASSERT_EQ(1ul, paths.size());
   ASSERT_EQ(P("[A->C, C->D]"), paths[0]->links());
@@ -429,12 +508,11 @@ TEST_F(Braess, DFSConstraint) {
 TEST_F(Braess, DFSVisitConstraint) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("C")});
-  SubGraph sub_graph(&storage_, &constraints);
 
   std::vector<std::unique_ptr<Walk>> paths;
-  sub_graph.Paths(N("A"), N("D"), [&paths](std::unique_ptr<Walk> path) {
+  Paths(N("A"), N("D"), [&paths](std::unique_ptr<Walk> path) {
     paths.emplace_back(std::move(path));
-  }, {});
+  }, graph_, constraints);
 
   std::sort(paths.begin(), paths.end(), [](const std::unique_ptr<Walk>& lhs,
                                            const std::unique_ptr<Walk>& rhs) {
@@ -447,9 +525,8 @@ TEST_F(Braess, DFSVisitConstraint) {
 
 TEST_F(Braess, KSP) {
   ConstraintSet constraints;
-  SubGraph sub_graph(&storage_, &constraints);
 
-  KShortestPathsGenerator ksp(N("A"), N("D"), sub_graph);
+  KShortestPathsGenerator ksp(N("A"), N("D"), graph_, constraints);
   ASSERT_EQ(P("[A->C, C->D]"), ksp.KthShortestPathOrNull(0)->links());
   ASSERT_EQ(P("[A->B, B->D]"), ksp.KthShortestPathOrNull(1)->links());
   ASSERT_EQ(P("[A->B, B->C, C->D]"), ksp.KthShortestPathOrNull(2)->links());
@@ -459,9 +536,8 @@ TEST_F(Braess, KSP) {
 TEST_F(Braess, KSPConstraint) {
   ConstraintSet constraints;
   constraints.Exclude().Links({L("A", "C")});
-  SubGraph sub_graph(&storage_, &constraints);
 
-  KShortestPathsGenerator ksp(N("A"), N("D"), sub_graph);
+  KShortestPathsGenerator ksp(N("A"), N("D"), graph_, constraints);
   ASSERT_EQ(P("[A->B, B->D]"), ksp.KthShortestPathOrNull(0)->links());
   ASSERT_EQ(P("[A->B, B->C, C->D]"), ksp.KthShortestPathOrNull(1)->links());
   ASSERT_EQ(nullptr, ksp.KthShortestPathOrNull(2));
@@ -470,9 +546,8 @@ TEST_F(Braess, KSPConstraint) {
 TEST_F(Braess, KSPVistConstraint) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("C")});
-  SubGraph sub_graph(&storage_, &constraints);
 
-  KShortestPathsGenerator ksp(N("A"), N("D"), sub_graph);
+  KShortestPathsGenerator ksp(N("A"), N("D"), graph_, constraints);
   ASSERT_EQ(P("[A->C, C->D]"), ksp.KthShortestPathOrNull(0)->links());
   ASSERT_EQ(P("[A->B, B->C, C->D]"), ksp.KthShortestPathOrNull(1)->links());
   ASSERT_EQ(nullptr, ksp.KthShortestPathOrNull(2));
@@ -482,9 +557,8 @@ TEST_F(Braess, KSPVisitConstraintNonSimple) {
   ConstraintSet constraints;
   constraints.AddToVisitSet({N("C")});
   constraints.AddToVisitSet({N("B")});
-  SubGraph sub_graph(&storage_, &constraints);
 
-  KShortestPathsGenerator ksp(N("A"), N("D"), sub_graph);
+  KShortestPathsGenerator ksp(N("A"), N("D"), graph_, constraints);
   ASSERT_EQ(P("[A->C, C->A, A->B, B->D]"),
             ksp.KthShortestPathOrNull(0)->links());
   ASSERT_EQ(nullptr, ksp.KthShortestPathOrNull(1));
@@ -493,37 +567,69 @@ TEST_F(Braess, KSPVisitConstraintNonSimple) {
 TEST_F(Braess, KSPVistConstraintDisjunct) {
   ConstraintSet constraints_one;
   constraints_one.AddToVisitSet({N("C")});
-  SubGraph sub_graph_one(&storage_, &constraints_one);
 
   ConstraintSet constraints_two;
   constraints_two.AddToVisitSet({N("C")});
-  SubGraph sub_graph_two(&storage_, &constraints_two);
 
   // We are OR-ing two identical constraints---the result should be the same as
   // with a single constraint.
-  DisjunctKShortestPathsGenerator ksp(N("A"), N("D"),
-                                      {&sub_graph_one, &sub_graph_two});
+  DisjunctKShortestPathsGenerator ksp(N("A"), N("D"), graph_,
+                                      {constraints_one, constraints_two});
   ASSERT_EQ(P("[A->C, C->D]"), ksp.KthShortestPathOrNull(0)->links());
   ASSERT_EQ(P("[A->B, B->C, C->D]"), ksp.KthShortestPathOrNull(1)->links());
   ASSERT_EQ(nullptr, ksp.KthShortestPathOrNull(2));
+
+  size_t gen_index = 1;
+  ksp.KthShortestPathOrNull(0, &gen_index);
+  ASSERT_EQ(0ul, gen_index);
+  ksp.KthShortestPathOrNull(1, &gen_index);
+  ASSERT_EQ(0ul, gen_index);
 }
 
 TEST_F(Braess, KSPVistConstraintDisjunctTwo) {
   ConstraintSet constraints_one;
   constraints_one.AddToVisitSet({N("C")});
-  SubGraph sub_graph_one(&storage_, &constraints_one);
 
   ConstraintSet constraints_two;
   constraints_two.AddToVisitSet({N("B")});
-  SubGraph sub_graph_two(&storage_, &constraints_two);
 
   // Going through either C or B should yield all possible paths.
-  DisjunctKShortestPathsGenerator ksp(N("A"), N("D"),
-                                      {&sub_graph_one, &sub_graph_two});
+  DisjunctKShortestPathsGenerator ksp(N("A"), N("D"), graph_,
+                                      {constraints_one, constraints_two});
   ASSERT_EQ(P("[A->C, C->D]"), ksp.KthShortestPathOrNull(0)->links());
   ASSERT_EQ(P("[A->B, B->D]"), ksp.KthShortestPathOrNull(1)->links());
   ASSERT_EQ(P("[A->B, B->C, C->D]"), ksp.KthShortestPathOrNull(2)->links());
   ASSERT_EQ(nullptr, ksp.KthShortestPathOrNull(3));
+}
+
+TEST_F(Braess, WaypointCombineSingle) {
+  std::vector<std::vector<GraphNodeIndex>> waypoints = {{N("B"), N("C")}};
+  std::vector<GraphNodeIndex> model = {N("B"), N("C")};
+
+  ASSERT_EQ(
+      P("[A->B, B->C, C->D]"),
+      CombineWaypoints(N("A"), N("D"), {}, graph_.AdjacencyList(), waypoints)
+          ->links());
+}
+
+TEST_F(Braess, WaypointCombine) {
+  std::vector<std::vector<GraphNodeIndex>> waypoints = {{N("C")}, {N("B")}};
+  std::vector<GraphNodeIndex> model = {N("B"), N("C")};
+
+  ASSERT_EQ(
+      P("[A->B, B->C, C->D]"),
+      CombineWaypoints(N("A"), N("D"), {}, graph_.AdjacencyList(), waypoints)
+          ->links());
+}
+
+TEST_F(Braess, WaypointCombineReverse) {
+  std::vector<std::vector<GraphNodeIndex>> waypoints = {{N("B")}, {N("C")}};
+  std::vector<GraphNodeIndex> model = {N("B"), N("C")};
+
+  ASSERT_EQ(
+      P("[A->B, B->C, C->D]"),
+      CombineWaypoints(N("A"), N("D"), {}, graph_.AdjacencyList(), waypoints)
+          ->links());
 }
 
 }  // namespace
