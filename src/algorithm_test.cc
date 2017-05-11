@@ -4,6 +4,7 @@
 #include <initializer_list>
 #include <vector>
 
+#include "test_common.h"
 #include "gtest/gtest.h"
 #include "net_gen.h"
 
@@ -22,34 +23,7 @@ TEST(SimpleGraph, DoubleEdge) {
   ASSERT_FALSE(graph_storage.IsSimple());
 }
 
-class Base {
- protected:
-  Base(const GraphBuilder& builder) : graph_(builder) {}
-
-  // Returns the path described by a string.
-  Links P(const std::string& path_string) {
-    std::unique_ptr<Walk> walk = graph_.WalkFromStringOrDie(path_string);
-    if (!walk) {
-      return {};
-    }
-
-    return walk->links();
-  }
-
-  // Returns a node.
-  GraphNodeIndex N(const std::string& node) {
-    return graph_.NodeFromStringOrDie(node);
-  }
-
-  // Returns a link.
-  GraphLinkIndex L(const std::string& src, const std::string& dst) {
-    return graph_.LinkOrDie(src, dst);
-  }
-
-  GraphStorage graph_;
-};
-
-class SingleLink : public ::testing::Test, public Base {
+class SingleLink : public ::testing::Test, public test::Base {
  protected:
   static GraphBuilder GetBuilder() {
     GraphBuilder out;
@@ -80,7 +54,7 @@ TEST_F(SingleLink, SubGraph) {
       ShortestPathWithConstraints(N("A"), N("B"), graph_, constraints));
 }
 
-class ThreeEdges : public ::testing::Test, public Base {
+class ThreeEdges : public ::testing::Test, public test::Base {
  protected:
   static GraphBuilder GetBuilder() {
     GraphBuilder out;
@@ -150,7 +124,7 @@ TEST_F(ThreeEdges, SubGraphThree) {
       ShortestPathWithConstraints(N("C"), N("B"), graph_, constraints));
 }
 
-class FourEdges : public ::testing::Test, public Base {
+class FourEdges : public ::testing::Test, public test::Base {
  protected:
   static GraphBuilder GetBuilder() {
     GraphBuilder out;
@@ -397,7 +371,7 @@ TEST_F(FourEdges, KSPConstraintImpossible) {
   ASSERT_EQ(nullptr, ksp.KthShortestPathOrNull(1));
 }
 
-class Ring : public ::testing::Test, public Base {
+class Ring : public ::testing::Test, public test::Base {
  protected:
   static GraphBuilder GetBuilder() {
     GraphBuilder out;
@@ -434,7 +408,7 @@ TEST_F(Ring, DuplicateLinkNoAvoid) {
                 ->links());
 }
 
-class Braess : public ::testing::Test, public Base {
+class Braess : public ::testing::Test, public test::Base {
  protected:
   Braess() : Base(GenerateBraess(kBw)) {}
 };
@@ -606,30 +580,24 @@ TEST_F(Braess, WaypointCombineSingle) {
   std::vector<std::vector<GraphNodeIndex>> waypoints = {{N("B"), N("C")}};
   std::vector<GraphNodeIndex> model = {N("B"), N("C")};
 
-  ASSERT_EQ(
-      P("[A->B, B->C, C->D]"),
-      CombineWaypoints(N("A"), N("D"), {}, graph_.AdjacencyList(), waypoints)
-          ->links());
+  ASSERT_EQ(model, CombineWaypoints(N("A"), N("D"), {}, graph_.AdjacencyList(),
+                                    waypoints));
 }
 
 TEST_F(Braess, WaypointCombine) {
   std::vector<std::vector<GraphNodeIndex>> waypoints = {{N("C")}, {N("B")}};
   std::vector<GraphNodeIndex> model = {N("B"), N("C")};
 
-  ASSERT_EQ(
-      P("[A->B, B->C, C->D]"),
-      CombineWaypoints(N("A"), N("D"), {}, graph_.AdjacencyList(), waypoints)
-          ->links());
+  ASSERT_EQ(model, CombineWaypoints(N("A"), N("D"), {}, graph_.AdjacencyList(),
+                                    waypoints));
 }
 
 TEST_F(Braess, WaypointCombineReverse) {
   std::vector<std::vector<GraphNodeIndex>> waypoints = {{N("B")}, {N("C")}};
   std::vector<GraphNodeIndex> model = {N("B"), N("C")};
 
-  ASSERT_EQ(
-      P("[A->B, B->C, C->D]"),
-      CombineWaypoints(N("A"), N("D"), {}, graph_.AdjacencyList(), waypoints)
-          ->links());
+  ASSERT_EQ(model, CombineWaypoints(N("A"), N("D"), {}, graph_.AdjacencyList(),
+                                    waypoints));
 }
 
 }  // namespace

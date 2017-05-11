@@ -37,6 +37,16 @@ void ConstraintSet::AddToVisitSet(const GraphNodeSet& set) {
   }
 }
 
+void ConstraintSet::ExtendFirstSetToVisitOrDie(const GraphNodeSet& set) {
+  CHECK(to_visit_.size() == 1);
+  GraphNodeSet current_to_visit = to_visit_[0];
+  current_to_visit.InsertAll(set);
+
+  to_visit_.clear();
+  node_to_visit_index_.Clear();
+  AddToVisitSet(current_to_visit);
+}
+
 void ExclusionSet::AddAll(const ExclusionSet& other) {
   links_to_exclude_.InsertAll(other.links_to_exclude_);
   nodes_to_exclude_.InsertAll(other.nodes_to_exclude_);
@@ -850,7 +860,7 @@ const Walk* DisjunctKShortestPathsGenerator::KthShortestPathOrNull(
 
 DisjunctKShortestPathsGenerator::DisjunctKShortestPathsGenerator(
     GraphNodeIndex src, GraphNodeIndex dst, const GraphStorage& graph,
-    const std::vector<ConstraintSet>& constraints) {
+    const std::set<ConstraintSet>& constraints) {
   for (const ConstraintSet& constraint_set : constraints) {
     ksp_generators_.emplace_back(
         make_unique<KShortestPathsGenerator>(src, dst, graph, constraint_set));
@@ -936,7 +946,7 @@ static GraphNodeMap<std::unique_ptr<ShortestPath>> GetSPTrees(
   return out;
 }
 
-std::unique_ptr<Walk> CombineWaypoints(
+std::vector<GraphNodeIndex> CombineWaypoints(
     GraphNodeIndex src, GraphNodeIndex dst, const ExclusionSet& exclusion_set,
     const AdjacencyList& adj_list,
     const std::vector<std::vector<GraphNodeIndex>>& waypoints) {
@@ -961,21 +971,8 @@ std::unique_ptr<Walk> CombineWaypoints(
   for (size_t i = 1; i < waypoints.size(); ++i) {
     Merge(waypoints[i], sp_trees, &current_waypoints);
   }
-
-  Links links_in_path;
-  Delay total_delay = Delay::zero();
-  for (size_t i = 0; i < current_waypoints.size() - 1; ++i) {
-    GraphNodeIndex from = current_waypoints[i];
-    GraphNodeIndex to = current_waypoints[i + 1];
-
-    std::unique_ptr<Walk> sub_path = sp_trees.GetValueOrDie(from)->GetPath(to);
-    total_delay += sub_path->delay();
-
-    links_in_path.insert(links_in_path.end(), sub_path->links().begin(),
-                         sub_path->links().end());
-  }
-
-  return make_unique<Walk>(links_in_path, total_delay);
+  return {std::next(current_waypoints.begin(), 1),
+          std::next(current_waypoints.end(), -1)};
 }
 
 }  // namespace nc

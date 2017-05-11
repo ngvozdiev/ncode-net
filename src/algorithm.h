@@ -39,6 +39,16 @@ class ExclusionSet {
   // Adds all elements from another set to this one.
   void AddAll(const ExclusionSet& other);
 
+  friend bool operator==(const ExclusionSet& lhs, const ExclusionSet& rhs) {
+    return lhs.links_to_exclude_ == rhs.links_to_exclude_ &&
+           lhs.nodes_to_exclude_ == rhs.nodes_to_exclude_;
+  }
+
+  friend bool operator<(const ExclusionSet& lhs, const ExclusionSet& rhs) {
+    return std::tie(lhs.links_to_exclude_, lhs.nodes_to_exclude_) <
+           std::tie(rhs.links_to_exclude_, rhs.nodes_to_exclude_);
+  }
+
  private:
   // Links/nodes that will be excluded from the graph.
   GraphLinkSet links_to_exclude_;
@@ -65,6 +75,11 @@ class ConstraintSet {
 
   // Adds a new set of nodes to be visited.
   void AddToVisitSet(const GraphNodeSet& set);
+
+  // Adds a set of nodes to the first set of nodes to be visited. If there is no
+  // first set of nodes to be visited, or if there are multiple sets of nodes to
+  // be visited will die.
+  void ExtendFirstSetToVisitOrDie(const GraphNodeSet& set);
 
   // If the links partially satisfy the visit constraints will return the index
   // of the last constraint that the links satisfy + 1. If the links fully
@@ -100,6 +115,16 @@ class ConstraintSet {
                                     GraphNodeIndex dst) const;
 
   std::string ToString(const GraphStorage& storage) const;
+
+  friend bool operator==(const ConstraintSet& lhs, const ConstraintSet& rhs) {
+    return lhs.exclusion_set_ == rhs.exclusion_set_ &&
+           lhs.to_visit_ == rhs.to_visit_;
+  }
+
+  friend bool operator<(const ConstraintSet& lhs, const ConstraintSet& rhs) {
+    return std::tie(lhs.exclusion_set_, lhs.to_visit_) <
+           std::tie(rhs.exclusion_set_, rhs.to_visit_);
+  }
 
  private:
   // Links/nodes that will be excluded from the graph.
@@ -357,9 +382,9 @@ class KShortestPathsGenerator {
 // Like KShortestPathsGenerator above, but handles multiple constraint sets.
 class DisjunctKShortestPathsGenerator {
  public:
-  DisjunctKShortestPathsGenerator(
-      GraphNodeIndex src, GraphNodeIndex dst, const GraphStorage& graph,
-      const std::vector<ConstraintSet>& constraints);
+  DisjunctKShortestPathsGenerator(GraphNodeIndex src, GraphNodeIndex dst,
+                                  const GraphStorage& graph,
+                                  const std::set<ConstraintSet>& constraints);
 
   // Returns the Kth shortest path. If 'gen_index' is no null will populate it
   // with the index of the generator that the path comes from.
@@ -409,7 +434,7 @@ class DisjunctKShortestPathsGenerator {
 // Combines multiple waypoint lists into one. The resulting list will obey all
 // original waypoint lists. The delay map is assumed to contain the distances
 // between all waypoints.
-std::unique_ptr<Walk> CombineWaypoints(
+std::vector<GraphNodeIndex> CombineWaypoints(
     GraphNodeIndex src, GraphNodeIndex dst, const ExclusionSet& exclusion_set,
     const AdjacencyList& adj_list,
     const std::vector<std::vector<GraphNodeIndex>>& waypoints);

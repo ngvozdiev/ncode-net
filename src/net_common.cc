@@ -312,6 +312,17 @@ bool Walk::ContainsAny(GraphLinkSet links) const {
   return false;
 }
 
+bool Walk::ContainsAny(GraphNodeSet nodes, const GraphStorage& storage) const {
+  for (GraphLinkIndex link_index : links_) {
+    const GraphLink* link_ptr = storage.GetLink(link_index);
+    if (nodes.Contains(link_ptr->src()) || nodes.Contains(link_ptr->dst())) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 bool Walk::IsTrail() const { return !HasDuplicateLinks(links_); }
 
 bool Walk::IsPath(const GraphStorage& graph_storage) const {

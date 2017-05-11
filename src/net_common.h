@@ -244,6 +244,9 @@ class Walk {
   // Returns true if any of the links in this walk are in the set.
   bool ContainsAny(GraphLinkSet links) const;
 
+  // Returns true if any of the nodes in this walk are in the set.
+  bool ContainsAny(GraphNodeSet nodes, const GraphStorage& storage) const;
+
   // Returns true if there are no duplicate links in the walk.
   bool IsTrail() const;
 

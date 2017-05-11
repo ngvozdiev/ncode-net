@@ -1,170 +1,81 @@
-#ifndef NCODE_NET_GEN_H
-#define NCODE_NET_GEN_H
+#ifndef NCODE_NET_GRAPH_QUERY_H
+#define NCODE_NET_GRAPH_QUERY_H
 
-#include <chrono>
-#include <cstdint>
-#include <random>
+#include <memory>
 #include <vector>
 
-#include "net_common.h"
 #include "algorithm.h"
+#include "net_common.h"
 
 namespace nc {
 namespace net {
 
 class PathExpression {
  public:
-  PathExpression(const GraphStorage* graph) : graph_(graph) {}
+  PathExpression(GraphNodeIndex src, GraphNodeIndex dst,
+                 const GraphStorage* graph)
+      : src_(src), dst_(dst), graph_(graph) {}
+
+  // A convenience constructor that constructs this expression with a single set
+  // of nodes in the visit order.
+  PathExpression(GraphNodeIndex src, GraphNodeIndex dst,
+                 const GraphNodeSet& initial_set, const GraphStorage* graph)
+      : src_(src), dst_(dst), graph_(graph) {
+    constraints_.insert({{}, {initial_set}});
+  }
+
+  PathExpression(GraphNodeIndex src, GraphNodeIndex dst,
+                 const ExclusionSet& exclusion_set, const GraphStorage* graph)
+      : src_(src), dst_(dst), graph_(graph) {
+    constraints_.insert({exclusion_set, {}});
+  }
 
   // Returns a generator capable of generating the K shortest paths that comply
   // with this expression.
-  std::unique_ptr<DisjunctKShortestPathsGenerator> Evaluate(
-      GraphNodeIndex src, GraphNodeIndex dst) const {}
+  std::unique_ptr<DisjunctKShortestPathsGenerator> Evaluate() const;
 
   // Produces an expression which is the AND of this expression and another one.
-  // Unlike other operations, AND needs to happen in the context of a source and
-  // a destination.
-  std::unique_ptr<PathExpression> And(const PathExpression& other,
-                                      GraphNodeIndex src,
-                                      GraphNodeIndex dst) const {
-    // Only know how to handle two rules with one set of constraints each. When
-    // multiple sets of constraints are disjuncted it is hard to figure out
-    // which combination we should go for.
-    CHECK(constraints_.size() == 1 && other.constraints_.size() == 1);
+  std::unique_ptr<PathExpression> And(const PathExpression& other) const;
 
-    // Will get for this and the other expression the best path.
-    auto gen_this = Evaluate(src, dst);
-    auto gen_other = other.Evaluate(src, dst);
+  // Produces an expression which is the OR of this expression and another one.
+  std::unique_ptr<PathExpression> Or(const PathExpression& other) const;
 
-    size_t best_generator_index_this;
-    const Walk* best_walk_this =
-        gen_this->KthShortestPathOrNull(0, &best_generator_index_this);
+  // Produces an expression in which the nodes to visit in 'other' follow the
+  // nodes to visit in this one.
+  std::unique_ptr<PathExpression> Then(const PathExpression& other) const;
 
-    size_t best_generator_index_other;
-    const Walk* best_walk_other =
-        gen_other->KthShortestPathOrNull(0, &best_generator_index_other);
-    if (best_walk_other == nullptr || best_walk_this == nullptr) {
-      return {};
-    }
+  // If this expression is satisfiable, returns an expression equvalent to this
+  // one. If not returns one equivalent to 'other'.
+  std::unique_ptr<PathExpression> Fallback(const PathExpression& other) const;
 
-    // Now we have the two best paths from each expression. We also have for
-    // each expression the index of the OR clause that generated the path. The
-    // result of this AND will have an exclusion set that is the combination of
-    // the exclusion sets of each expression's clause.
-    const KShortestPathsGenerator* best_generator_this =
-        gen_this->ksp_generator(best_generator_index_this);
-    const KShortestPathsGenerator* best_generator_other =
-        gen_other->ksp_generator(best_generator_index_other);
+  const std::set<ConstraintSet>& constraints() const { return constraints_; }
 
-    const ConstraintSet& best_constraint_set_this =
-        best_generator_this->constraints();
-    const ConstraintSet& best_constraint_set_other =
-        best_generator_other->constraints();
+  // A simple rule is one that has only one constraint and that constraint has
+  // only one set to visit.
+  bool IsSimple() const;
 
-    // There are no guarantees that the new exclusion set avoids both paths, but
-    // whatever rule we produce needs to be compliant with both exclusion sets.
-    ExclusionSet new_exclusion_set;
-    new_exclusion_set.AddAll(best_constraint_set_this.exclusion_set());
-    new_exclusion_set.AddAll(best_constraint_set_other.exclusion_set());
-
-    // For each of the two best paths need to figure out what the waypoints are.
-    // Waypoints are the nodes that make the path compliant---they are one or
-    // more nodes from each of the sets that the path needs to visit.
-    std::vector<GraphNodeIndex> waypoints_this =
-        best_constraint_set_this.Waypoints(best_walk_this->links(), *graph_);
-    std::vector<GraphNodeIndex> waypoints_other =
-        best_constraint_set_other.Waypoints(best_walk_other->links(), *graph_);
-
-    std::vector<GraphNodeIndex> waypoints_combined =
-        CombineWaypoints(src, dst, new_exclusion_set, graph_->AdjacencyList(),
-                         {waypoints_this, waypoints_other});
-
-    std::vector<GraphNodeSet> to_visit;
-    // Now need to reverse the process---given the waypoints need to convert
-    // back to sets.
-    for (GraphNodeIndex waypoint : waypoints_combined) {
-      const GraphNodeSet* set =
-          best_constraint_set_this.FindSetToVisitOrNull(waypoint);
-      if (set != nullptr) {
-        to_visit.emplace_back(*set);
-      }
-
-      set = best_constraint_set_other.FindSetToVisitOrNull(waypoint);
-      if (set != nullptr) {
-        to_visit.emplace_back(*set);
-      }
-    }
-
-    auto to_return = make_unique<PathExpression>(graph_);
-    to_return->constraints_.emplace_back(new_exclusion_set, to_visit);
-    return to_return;
-  }
-
-  std::unique_ptr<PathExpression> Or(const PathExpression& other) const {
-    auto to_return = make_unique<PathExpression>(graph_);
-    std::vector<ConstraintSet>& constraints_to_return = to_return->constraints_;
-
-    constraints_to_return = constraints_;
-    constraints_to_return.insert(constraints_to_return.end(),
-                                 other.constraints_.begin(),
-                                 other.constraints_.end());
-    return to_return;
-  }
-
-  // Returns a new constraint set that is the result of 'second' added to
-  // 'first'. The exclusion sets will be combined. The list of sets of nodes to
-  // visit from the second one will be appended to the list of sets of nodes
-  // from the first one.
-  static ConstraintSet ExtendConstraintSet(const ConstraintSet& first,
-                                           const ConstraintSet& second) {
-    ConstraintSet return_set = first;
-    return_set.Exclude().AddAll(second.exclusion_set());
-
-    for (const auto& set_to_visit : second.to_visit()) {
-      return_set.AddToVisitSet(set_to_visit);
-    }
-
-    return return_set;
-  }
-
-  std::unique_ptr<PathExpression> Then(const PathExpression& other) const {
-    std::vector<ConstraintSet> new_constraints;
-    for (const ConstraintSet& other_constraint_set : other.constraints_) {
-      for (const ConstraintSet& constraint_set : constraints_) {
-        new_constraints.emplace_back(
-            ExtendConstraintSet(constraint_set, other_constraint_set));
-      }
-    }
-
-    auto to_return = make_unique<PathExpression>(graph_);
-    to_return->constraints_ = std::move(new_constraints);
-    return to_return;
-  }
-
-  std::unique_ptr<PathExpression> Fallback(const PathExpression& other,
-                                           GraphNodeIndex src,
-                                           GraphNodeIndex dst) const {
-    auto gen = Evaluate(src, dst);
-    const Walk* sp = gen->KthShortestPathOrNull(0);
-    if (sp != nullptr) {
-      auto to_return = make_unique<PathExpression>(graph_);
-      to_return->constraints_ = constraints_;
-      return to_return;
-    }
-
-    auto to_return = make_unique<PathExpression>(graph_);
-    to_return->constraints_ = other.constraints_;
-    return to_return;
+  friend bool operator==(const PathExpression& lhs, const PathExpression& rhs) {
+    return lhs.src_ == rhs.src_ && lhs.dst_ == rhs.dst_ &&
+           lhs.constraints_ == rhs.constraints_ && lhs.graph_ == lhs.graph_;
   }
 
  private:
+  void CheckSameContext(const PathExpression& other) const;
+
+  // The source and the destination are needed as the results of operations on
+  // this rule may depend on them.
+  GraphNodeIndex src_;
+  GraphNodeIndex dst_;
+
   // The disjunction of multiple constraint sets.
-  std::vector<ConstraintSet> constraints_;
+  std::set<ConstraintSet> constraints_;
 
   // The graph.
   const GraphStorage* graph_;
+
+  DISALLOW_COPY_AND_ASSIGN(PathExpression);
 };
 
 }  // namespace net
-}  // namespace ncode
+}  // namespace nc
 #endif

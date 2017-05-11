@@ -50,8 +50,8 @@ include_directories(${PCAP_INCLUDE_DIR})
 add_subdirectory(external/ncode_common)
 include_directories(${CMAKE_SOURCE_DIR}/external)
 
-set(NET_HEADER_FILES src/net_common.h src/net_gen.h src/pcap.h src/algorithm.h src/trie.h)
-add_library(ncode_net STATIC src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc ${NET_HEADER_FILES})
+set(NET_HEADER_FILES src/net_common.h src/net_gen.h src/pcap.h src/algorithm.h src/trie.h src/graph_query.h)
+add_library(ncode_net STATIC src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc src/graph_query.cc ${NET_HEADER_FILES})
 target_link_libraries(ncode_net ${PCAP_LIBRARY} ncode_common)
 
 if (NOT NCODE_NET_DISABLE_TESTS)
@@ -59,6 +59,7 @@ if (NOT NCODE_NET_DISABLE_TESTS)
   add_test_exec(net_gen_test src/net_gen_test.cc ncode_net)
   add_test_exec(net_algorithm_test src/algorithm_test.cc ncode_net)
   add_test_exec(net_trie_test src/trie_test.cc ncode_net)
+  add_test_exec(net_graph_query_test src/graph_query_test.cc ncode_net)
 endif()
 
 if (NOT NCODE_NET_DISABLE_BENCHMARKS)
