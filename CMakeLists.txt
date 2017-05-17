@@ -44,16 +44,8 @@ if (NOT NCODE_NET_DISABLE_TESTS)
 endif()
 
 if (NOT TARGET ncode_common)
-  include(ExternalProject)
-  ExternalProject_Add(ncode_common_lib
-                      PREFIX ${CMAKE_BINARY_DIR}/ncode_common
-                      GIT_REPOSITORY "https://github.com/ngvozdiev/ncode-common.git"
-                      GIT_TAG "master"
-                      INSTALL_COMMAND ""
-                      CONFIGURE_COMMAND ""
-                      BUILD_COMMAND "")
-   add_subdirectory(${CMAKE_BINARY_DIR}/ncode_common/src/ncode_common_lib)
-   FILE(COPY ${CMAKE_BINARY_DIR}/ncode_common/src/ncode_common_lib/src DESTINATION ${CMAKE_BINARY_DIR}/external/ncode_common)
+   EXECUTE_PROCESS(COMMAND "git" "clone" "https://github.com/ngvozdiev/ncode-common.git" "${CMAKE_BINARY_DIR}/external/ncode_common")
+   add_subdirectory(${CMAKE_BINARY_DIR}/external/ncode_common)
 endif()
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_extensions)
@@ -76,6 +68,3 @@ if (NOT NCODE_NET_DISABLE_BENCHMARKS)
   add_executable(net_algorithm_benchmark src/algorithm_benchmark.cc)
   target_link_libraries(net_algorithm_benchmark ncode_net)
 endif()
-
-install (TARGETS ncode_net DESTINATION lib)
-install (FILES ${NET_HEADER_FILES} DESTINATION include/ncode_common)
