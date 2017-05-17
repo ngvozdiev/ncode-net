@@ -327,6 +327,12 @@ class KShortestPathsGenerator {
 
   size_t k() const { return k_paths_.size(); }
 
+  // Returns the shortest path that complies with the constraints and avoids a
+  // set of nodes/links.
+  std::unique_ptr<Walk> ShortestPathThatAvoids(
+      const GraphNodeSet& nodes_to_avoid,
+      const GraphLinkSet& links_to_avoid) const;
+
   const GraphStorage* graph() const { return storage_; }
 
   const ConstraintSet& constraints() const { return constraints_; }
@@ -346,7 +352,7 @@ class KShortestPathsGenerator {
   std::unique_ptr<Walk> ShortestPath(GraphNodeIndex src, GraphNodeIndex dst,
                                      const GraphNodeSet& nodes_to_avoid,
                                      const GraphLinkSet& links_to_avoid,
-                                     const Links& links_so_far);
+                                     const Links& links_so_far) const;
 
   // Adds the next shortest paths to the K shortest paths list. Returns true if
   // no more shortest paths exist.
@@ -386,7 +392,7 @@ class DisjunctKShortestPathsGenerator {
                                   const GraphStorage& graph,
                                   const std::set<ConstraintSet>& constraints);
 
-  // Returns the Kth shortest path. If 'gen_index' is no null will populate it
+  // Returns the Kth shortest path. If 'gen_index' is not null will populate it
   // with the index of the generator that the path comes from.
   const Walk* KthShortestPathOrNull(size_t k, size_t* gen_index = nullptr);
 
@@ -395,6 +401,14 @@ class DisjunctKShortestPathsGenerator {
     CHECK(i < ksp_generators_.size());
     return ksp_generators_[i].get();
   }
+
+  // Returns the K shortest paths.
+  const std::vector<const Walk*>& k_paths() const { return k_paths_; }
+
+  // Returns the shortest path that complies with the constraints and avoids a
+  // set of nodes/links.
+  std::unique_ptr<Walk> ShortestPathThatAvoids(
+      const GraphNodeSet& nodes_to_avoid, const GraphLinkSet& links_to_avoid);
 
  private:
   struct PathGenAndPath {
@@ -428,7 +442,11 @@ class DisjunctKShortestPathsGenerator {
   std::vector<std::unique_ptr<KShortestPathsGenerator>> ksp_generators_;
 
   // The K shortest paths, owned by their respective generators.
-  std::vector<std::pair<size_t, const Walk*>> k_paths_;
+  std::vector<const Walk*> k_paths_;
+
+  // For the K-th shortest path the index of the generator that generated the
+  // path.
+  std::vector<size_t> k_path_generator_indices_;
 };
 
 // Combines multiple waypoint lists into one. The resulting list will obey all

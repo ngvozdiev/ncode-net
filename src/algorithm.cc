@@ -655,7 +655,7 @@ std::unique_ptr<Walk> ShortestPathWithConstraints(
 
 std::unique_ptr<Walk> KShortestPathsGenerator::ShortestPath(
     GraphNodeIndex src, GraphNodeIndex dst, const GraphNodeSet& nodes_to_avoid,
-    const GraphLinkSet& links_to_avoid, const Links& links_so_far) {
+    const GraphLinkSet& links_to_avoid, const Links& links_so_far) const {
   size_t to_visit_index = constraints_.MinVisit(links_so_far, *storage_);
   const VisitList& to_visit = constraints_.to_visit();
   auto start_it = std::next(to_visit.begin(), to_visit_index);
@@ -663,6 +663,12 @@ std::unique_ptr<Walk> KShortestPathsGenerator::ShortestPath(
   return ShortestPathStatic(src, dst, nodes_to_avoid, links_to_avoid,
                             constraints_.exclusion_set(), start_it,
                             to_visit.end(), storage_->AdjacencyList());
+}
+
+std::unique_ptr<Walk> KShortestPathsGenerator::ShortestPathThatAvoids(
+    const GraphNodeSet& nodes_to_avoid,
+    const GraphLinkSet& links_to_avoid) const {
+  return ShortestPath(src_, dst_, nodes_to_avoid, links_to_avoid, {});
 }
 
 bool KShortestPathsGenerator::NextPath() {
@@ -832,12 +838,12 @@ const Walk* DisjunctKShortestPathsGenerator::Next(size_t* generator_index) {
 const Walk* DisjunctKShortestPathsGenerator::KthShortestPathOrNull(
     size_t k, size_t* generator_index) {
   if (k < k_paths_.size()) {
-    const auto& id_and_path = k_paths_[k];
+    const Walk* path = k_paths_[k];
     if (generator_index != nullptr) {
-      *generator_index = id_and_path.first;
+      *generator_index = k_path_generator_indices_[k];
     }
 
-    return id_and_path.second;
+    return path;
   }
 
   size_t delta = k + 1 - k_paths_.size();
@@ -852,10 +858,11 @@ const Walk* DisjunctKShortestPathsGenerator::KthShortestPathOrNull(
       *generator_index = gen_index;
     }
 
-    k_paths_.emplace_back(gen_index, next);
+    k_paths_.emplace_back(next);
+    k_path_generator_indices_.emplace_back(gen_index);
   }
 
-  return k_paths_.back().second;
+  return k_paths_.back();
 }
 
 DisjunctKShortestPathsGenerator::DisjunctKShortestPathsGenerator(
@@ -873,6 +880,25 @@ DisjunctKShortestPathsGenerator::DisjunctKShortestPathsGenerator(
       queue_.emplace(i, walk);
     }
   }
+}
+
+std::unique_ptr<Walk> DisjunctKShortestPathsGenerator::ShortestPathThatAvoids(
+    const GraphNodeSet& nodes_to_avoid, const GraphLinkSet& links_to_avoid) {
+  std::unique_ptr<Walk> current;
+  for (const auto& generator : ksp_generators_) {
+    auto p = generator->ShortestPathThatAvoids(nodes_to_avoid, links_to_avoid);
+    if (!p) {
+      continue;
+    }
+
+    if (current && p->delay() > current->delay()) {
+      continue;
+    }
+
+    current = std::move(p);
+  }
+
+  return current;
 }
 
 static Delay DelayOrDie(
