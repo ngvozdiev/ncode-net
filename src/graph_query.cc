@@ -3,8 +3,8 @@
 #include <stddef.h>
 #include <algorithm>
 
-#include "ncode_common/src/common.h"
-#include "ncode_common/src/logging.h"
+#include "ncode_common/common.h"
+#include "ncode_common/logging.h"
 
 namespace nc {
 namespace net {

@@ -27,7 +27,7 @@ endif()
 if (NCODE_NET_DEBUG)
   set(NCODE_NET_BASE_FLAGS "${NCODE_NET_BASE_FLAGS} -O0 -fno-omit-frame-pointer")
 else()
-  set(NCODE_NET_BASE_FLAGS "${NCODE_NET_BASE_FLAGS} -O3 -march=native -DNDEBUG")   
+  set(NCODE_NET_BASE_FLAGS "${NCODE_NET_BASE_FLAGS} -O3 -march=native -DNDEBUG")
 endif()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${NCODE_NET_BASE_FLAGS}")
@@ -43,15 +43,27 @@ if (NOT NCODE_NET_DISABLE_TESTS)
    endmacro(add_test_exec)
 endif()
 
+if (NOT TARGET ncode_common_lib)
+  include(ExternalProject)
+  ExternalProject_Add(ncode_common_lib
+                      PREFIX ${CMAKE_BINARY_DIR}/ncode_common
+                      GIT_REPOSITORY "https://github.com/ngvozdiev/ncode-common.git"
+                      GIT_TAG "master"
+                      BINARY_DIR ${CMAKE_BINARY_DIR}/ext_build/ncode_common
+                      CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external
+                      BUILD_COMMAND make)
+endif()
+
+add_library(ncode_common STATIC IMPORTED)
+set_property(TARGET ncode_common PROPERTY IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/lib/libncode_common.a)
+
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_extensions)
 find_package(PCAP REQUIRED)
-include_directories(${PCAP_INCLUDE_DIR})
-
-add_subdirectory(external/ncode_common)
-include_directories(${CMAKE_SOURCE_DIR}/external)
+include_directories(${PCAP_INCLUDE_DIR} ${CMAKE_BINARY_DIR}/external/include)
 
 set(NET_HEADER_FILES src/net_common.h src/net_gen.h src/pcap.h src/algorithm.h src/trie.h src/graph_query.h)
 add_library(ncode_net STATIC src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc src/graph_query.cc ${NET_HEADER_FILES})
+add_dependencies(ncode_net ncode_common_lib)
 target_link_libraries(ncode_net ${PCAP_LIBRARY} ncode_common)
 
 if (NOT NCODE_NET_DISABLE_TESTS)

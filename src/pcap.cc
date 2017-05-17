@@ -5,9 +5,9 @@
 #include <poll.h>
 #include <mutex>
 
-#include "ncode_common/src/common.h"
-#include "ncode_common/src/logging.h"
-#include "ncode_common/src/substitute.h"
+#include "ncode_common/common.h"
+#include "ncode_common/logging.h"
+#include "ncode_common/substitute.h"
 
 namespace nc {
 namespace pcap {

@@ -5,7 +5,7 @@
 
 #include "gtest/gtest.h"
 #include "net_gen.h"
-#include "ncode_common/src/substitute.h"
+#include "ncode_common/substitute.h"
 
 namespace nc {
 namespace net {
