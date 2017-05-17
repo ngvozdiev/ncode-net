@@ -43,7 +43,10 @@ if (NOT NCODE_NET_DISABLE_TESTS)
    endmacro(add_test_exec)
 endif()
 
-if (NOT TARGET ncode_common_lib)
+add_library(ncode_common STATIC IMPORTED)
+set_property(TARGET ncode_common PROPERTY IMPORTED_LOCATION "${CMAKE_BINARY_DIR}/external/lib/libncode_common.a")
+if (NOT EXISTS ${CMAKE_BINARY_DIR}/external/lib/libncode_common.a)
+  MESSAGE(STATUS "Unable to find ${CMAKE_BINARY_DIR}/external/lib/libncode_common.a")
   include(ExternalProject)
   ExternalProject_Add(ncode_common_lib
                       PREFIX ${CMAKE_BINARY_DIR}/ncode_common
@@ -54,16 +57,12 @@ if (NOT TARGET ncode_common_lib)
                       BUILD_COMMAND make)
 endif()
 
-add_library(ncode_common STATIC IMPORTED)
-set_property(TARGET ncode_common PROPERTY IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/lib/libncode_common.a)
-
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_extensions)
 find_package(PCAP REQUIRED)
 include_directories(${PCAP_INCLUDE_DIR} ${CMAKE_BINARY_DIR}/external/include)
 
 set(NET_HEADER_FILES src/net_common.h src/net_gen.h src/pcap.h src/algorithm.h src/trie.h src/graph_query.h)
 add_library(ncode_net STATIC src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc src/graph_query.cc ${NET_HEADER_FILES})
-add_dependencies(ncode_net ncode_common_lib)
 target_link_libraries(ncode_net ${PCAP_LIBRARY} ncode_common)
 
 if (NOT NCODE_NET_DISABLE_TESTS)
@@ -78,3 +77,6 @@ if (NOT NCODE_NET_DISABLE_BENCHMARKS)
   add_executable(net_algorithm_benchmark src/algorithm_benchmark.cc)
   target_link_libraries(net_algorithm_benchmark ncode_net)
 endif()
+
+install (TARGETS ncode_net DESTINATION lib)
+install (FILES ${NET_HEADER_FILES} DESTINATION include/ncode_common)
