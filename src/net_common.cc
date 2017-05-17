@@ -13,8 +13,8 @@
 #include <tuple>
 #include <utility>
 
-#include "ncode_common/map_util.h"
-#include "ncode_common/substitute.h"
+#include "ncode_common/src/map_util.h"
+#include "ncode_common/src/substitute.h"
 
 namespace nc {
 namespace net {

@@ -11,10 +11,10 @@
 #include <utility>
 #include <vector>
 
-#include "ncode_common/common.h"
-#include "ncode_common/logging.h"
-#include "ncode_common/perfect_hash.h"
-#include "ncode_common/strutil.h"
+#include "ncode_common/src/common.h"
+#include "ncode_common/src/logging.h"
+#include "ncode_common/src/perfect_hash.h"
+#include "ncode_common/src/strutil.h"
 
 namespace nc {
 namespace net {

@@ -6,7 +6,7 @@
 #include <string>
 
 #include "gtest/gtest.h"
-#include "ncode_common/strutil.h"
+#include "ncode_common/src/strutil.h"
 
 namespace nc {
 namespace net {

@@ -43,23 +43,22 @@ if (NOT NCODE_NET_DISABLE_TESTS)
    endmacro(add_test_exec)
 endif()
 
-add_library(ncode_common STATIC IMPORTED)
-set_property(TARGET ncode_common PROPERTY IMPORTED_LOCATION "${CMAKE_BINARY_DIR}/external/lib/libncode_common.a")
-if (NOT EXISTS ${CMAKE_BINARY_DIR}/external/lib/libncode_common.a)
-  MESSAGE(STATUS "Unable to find ${CMAKE_BINARY_DIR}/external/lib/libncode_common.a")
+if (NOT TARGET ncode_common)
   include(ExternalProject)
   ExternalProject_Add(ncode_common_lib
                       PREFIX ${CMAKE_BINARY_DIR}/ncode_common
                       GIT_REPOSITORY "https://github.com/ngvozdiev/ncode-common.git"
                       GIT_TAG "master"
-                      BINARY_DIR ${CMAKE_BINARY_DIR}/ext_build/ncode_common
-                      CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external
-                      BUILD_COMMAND make)
+                      INSTALL_COMMAND ""
+                      CONFIGURE_COMMAND ""
+                      BUILD_COMMAND "")
+   add_subdirectory(${CMAKE_BINARY_DIR}/ncode_common/src/ncode_common_lib)
+   FILE(COPY ${CMAKE_BINARY_DIR}/ncode_common/src/ncode_common_lib/src DESTINATION ${CMAKE_BINARY_DIR}/external/ncode_common)
 endif()
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_extensions)
 find_package(PCAP REQUIRED)
-include_directories(${PCAP_INCLUDE_DIR} ${CMAKE_BINARY_DIR}/external/include)
+include_directories(${PCAP_INCLUDE_DIR} ${CMAKE_BINARY_DIR}/external)
 
 set(NET_HEADER_FILES src/net_common.h src/net_gen.h src/pcap.h src/algorithm.h src/trie.h src/graph_query.h)
 add_library(ncode_net STATIC src/net_common.cc src/net_gen.cc src/pcap.cc src/algorithm.cc src/graph_query.cc ${NET_HEADER_FILES})
