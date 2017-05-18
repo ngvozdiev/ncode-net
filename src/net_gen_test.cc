@@ -156,13 +156,15 @@ TEST(Load, Repetita) {
       "\n"
       "\n"
       "label src dest weight bw delay\n"
+      "edge_10 2 1 10 1000000 10\n"
       "edge_0 0 1 10 1000000 10\n"
       "edge_1 1 0 10 1000000 10\n"
-      "edge_10 2 1 10 1000000 10\n"
       "edge_11 1 2 10 1000000 10";
 
   std::map<std::string, std::pair<double, double>> locations;
-  GraphBuilder builder = LoadRepetita(test_topology, &locations);
+  std::vector<std::string> nodes_in_order;
+  GraphBuilder builder =
+      LoadRepetitaOrDie(test_topology, &nodes_in_order, &locations);
 
   ASSERT_EQ(4ul, builder.links().size());
   ASSERT_EQ("0_UNIBRAW_0", builder.links().front().src_id());
@@ -177,6 +179,9 @@ TEST(Load, Repetita) {
   model_locations["2_KEIO_1"] = {3.0, 4.0};
   model_locations["7_ITB_2"] = {5.0, 6.0};
   ASSERT_EQ(model_locations, locations);
+
+  std::vector<std::string> model = {"0_UNIBRAW_0", "2_KEIO_1", "7_ITB_2"};
+  ASSERT_EQ(nodes_in_order, model);
 }
 
 }  // namespace net

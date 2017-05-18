@@ -502,8 +502,8 @@ static uint32_t ParseCountOrDie(const std::string& tag,
   return count;
 }
 
-GraphBuilder LoadRepetita(
-    const std::string& topology_string,
+GraphBuilder LoadRepetitaOrDie(
+    const std::string& topology_string, std::vector<std::string>* node_order,
     std::map<std::string, std::pair<double, double>>* locations) {
   std::vector<std::string> all_lines = Split(topology_string, "\n");
   auto it = all_lines.begin();
@@ -534,6 +534,10 @@ GraphBuilder LoadRepetita(
     CHECK(safe_strtod(line_split[2], &y));
 
     (*locations)[node_id] = {x, y};
+  }
+
+  if (node_order != nullptr) {
+    *node_order = nodes;
   }
 
   // Skip line.

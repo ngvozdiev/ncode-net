@@ -60,9 +60,12 @@ GraphBuilder GenerateBraess(Bandwidth bw);
 // are the x,y coordinates of the nodes. The nodes section is followed by and
 // empty line and "EDGES XX" on a new line. A comment line is next, followed by
 // for each edge "<label> <src> <dst> <weight> <bw> <delay>". The bandwidth is
-// in kbps and the delay in microseconds.
-GraphBuilder LoadRepetita(
+// in kbps and the delay in microseconds. If the 'node_order' parameter is
+// supplied, will populate it with the nodes from the graph in the same order in
+// which they appear in the topology string.
+GraphBuilder LoadRepetitaOrDie(
     const std::string& topology_string,
+    std::vector<std::string>* node_order = nullptr,
     std::map<std::string, std::pair<double, double>>* locations = nullptr);
 
 }  // namespace net

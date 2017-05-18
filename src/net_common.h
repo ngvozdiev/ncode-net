@@ -67,7 +67,7 @@ class Bandwidth : public TypesafeUintWrapper<BandwidthTag, uint64_t> {
   }
 
   double operator/(const Bandwidth& other) const {
-    return m_val_ / other.m_val_;
+    return m_val_ / static_cast<double>(other.m_val_);
   }
 
   Bandwidth operator/(double fraction) const {
