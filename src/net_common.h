@@ -74,6 +74,10 @@ class Bandwidth : public TypesafeUintWrapper<BandwidthTag, uint64_t> {
     return Bandwidth(m_val_ / fraction);
   }
 
+  Bandwidth operator*(double fraction) const {
+    return Bandwidth(m_val_ * fraction);
+  }
+
  private:
   constexpr Bandwidth(uint64_t value_bps)
       : TypesafeUintWrapper<BandwidthTag, uint64_t>(value_bps) {}
